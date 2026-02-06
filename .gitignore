@@ -8,12 +8,5 @@ api/dist
 web/dist
 /.idea/libraries/Dart_SDK.xml
 /.idea/runConfigurations/dev.xml
-/.idea/.gitignore
-/.idea/data_source_mapping.xml
-/.idea/dataSources.xml
-/.idea/db-forest-config.xml
-/.idea/MarsCodeWorkspaceAppSettings.xml
-/.idea/misc.xml
-/.idea/modules.xml
-/.idea/nobodytools.iml
-/.idea/vcs.xml
+/.idea/**
+.DS_STORE

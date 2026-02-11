@@ -1,5 +1,6 @@
-import { Card as AntCard, CardProps as AntCardProps } from "antd";
-import { CSSProperties, ReactNode } from "react";
+import type { CardProps as AntCardProps } from "antd";
+import { Card as AntCard } from "antd";
+import type { CSSProperties, ReactNode } from "react";
 
 export interface CardProps extends Omit<AntCardProps, "style"> {
   children: ReactNode;

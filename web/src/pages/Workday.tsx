@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button } from "../components/Button";
-import { Input, InputNumber } from "../components/Input";
-import { Select } from "../components/Select";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { InputNumber } from "../components/Input";
 import { Spin } from "../components/Spin";
-import { Alert } from "../components/Alert";
-import { CSSProperties } from "react";
+import { Modal, notification } from "antd";
+import type { CSSProperties } from "react";
+import type { TaskCalendarDayStatusItem } from "../components/TaskCalendar";
+import { TaskCalendar } from "../components/TaskCalendar";
 
 // ==================== Types ====================
 interface WorkSlot {
@@ -44,6 +44,11 @@ interface WorkDayResponse {
   record: DailyRecord;
 }
 
+interface MonthOverviewResponse {
+  month: string;
+  days: TaskCalendarDayStatusItem[];
+}
+
 interface NormalizedWorkList {
   days: NormalizedWorkDay[];
 }
@@ -57,16 +62,10 @@ type ItemStatus = 0 | 1 | 2;
 
 // ==================== Constants ====================
 const STATUS_CONFIG: Record<ItemStatus, { label: string; color: string; bg: string; border: string }> = {
-  0: { label: "待办", color: "#78716c", bg: "#fafaf9", border: "#e7e5e4" },
-  1: { label: "进行中", color: "#b45309", bg: "#fffbeb", border: "#fcd34d" },
-  2: { label: "已完成", color: "#15803d", bg: "#f0fdf4", border: "#86efac" }
+  0: { label: "待办", color: "#3b82f6", bg: "#eff6ff", border: "#bfdbfe" },
+  1: { label: "进行中", color: "#f59e0b", bg: "#fffbeb", border: "#fcd34d" },
+  2: { label: "已完成", color: "#10b981", bg: "#ecfdf5", border: "#a7f3d0" }
 };
-
-const statusOptions = [
-  { value: 0, label: "待办" },
-  { value: 1, label: "进行中" },
-  { value: 2, label: "已完成" }
-];
 
 // ==================== Utils ====================
 const formatDate = (value: Date) => {
@@ -74,22 +73,11 @@ const formatDate = (value: Date) => {
   return new Date(value.getTime() - offset).toISOString().slice(0, 10);
 };
 
-const formatDisplayDate = (dateStr: string) => {
-  const date = new Date(dateStr);
-  const today = new Date();
-  const isToday = date.toDateString() === today.toDateString();
-  
-  const weekdays = ["日", "一", "二", "三", "四", "五", "六"];
-  const weekday = weekdays[date.getDay()];
-  
-  return {
-    full: dateStr,
-    year: date.getFullYear(),
-    month: date.getMonth() + 1,
-    day: date.getDate(),
-    weekday,
-    isToday
-  };
+const toMonthValue = (dateStr: string) => dateStr.slice(0, 7);
+
+const resolveIsNarrow = () => {
+  if (typeof window === "undefined") return false;
+  return window.innerWidth < 1200;
 };
 
 const resolveErrorMessage = async (response: Response) => {
@@ -144,36 +132,27 @@ const buildEditableItem = (item: RecordItem): EditableItem => ({
   updated_time: item.updated_time
 });
 
+const containsHttpUrl = (text: string) => /https?:\/\/\S+/i.test(text);
+
 // ==================== Styles ====================
 const styles: Record<string, CSSProperties> = {
   page: {
     minHeight: "100vh",
-    background: "#fafaf9",
-    fontFamily: "'DM Sans', 'Noto Sans SC', -apple-system, sans-serif",
-    color: "#292524"
+    background: "#f4f1ea",
+    fontFamily: "'Space Grotesk', 'PingFang SC', 'Noto Sans SC', sans-serif",
+    color: "#1f2937"
   },
   container: {
-    maxWidth: "1280px",
+    maxWidth: "none",
     margin: "0 auto",
-    padding: "48px 32px"
+    padding: "32px 16px"
   },
   // Header
   header: {
-    marginBottom: "48px",
+    marginBottom: "24px",
     display: "flex",
     alignItems: "flex-start",
-    justifyContent: "space-between",
     gap: "24px"
-  },
-  headerLeft: {
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px"
-  },
-  dateRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "16px"
   },
   datePicker: {
     padding: "10px 14px",
@@ -193,7 +172,7 @@ const styles: Record<string, CSSProperties> = {
   },
   dateMain: {
     fontFamily: "'Playfair Display', 'Noto Serif SC', serif",
-    fontSize: "48px",
+    fontSize: "32px",
     fontWeight: 600,
     color: "#1c1917",
     letterSpacing: "-0.02em",
@@ -204,58 +183,50 @@ const styles: Record<string, CSSProperties> = {
     color: "#78716c",
     fontWeight: 500
   },
-  todayBadge: {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "6px 14px",
-    background: "#1c1917",
-    color: "#fafaf9",
-    borderRadius: "20px",
-    fontSize: "12px",
-    fontWeight: 600,
-    letterSpacing: "0.05em"
-  },
-  refreshBtn: {
-    padding: "10px 20px",
-    borderRadius: "8px",
-    border: "1px solid #e7e5e4",
-    background: "#fff",
-    color: "#57534e",
-    fontSize: "14px",
-    fontWeight: 500,
-    cursor: "pointer",
-    transition: "all 0.2s ease",
-    fontFamily: "inherit"
-  },
   // Stats
   statsBar: {
-    display: "flex",
-    gap: "8px",
-    marginBottom: "32px"
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+    gap: "16px",
+    marginBottom: "24px"
   },
   statPill: {
     display: "flex",
     alignItems: "center",
-    gap: "8px",
-    padding: "10px 18px",
-    borderRadius: "100px",
+    justifyContent: "space-between",
+    gap: "10px",
+    padding: "14px 16px",
+    borderRadius: "12px",
     fontSize: "13px",
-    fontWeight: 500
+    fontWeight: 600,
+    border: "1px solid #e5e7eb"
+  },
+  statMetricPill: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    padding: "14px 16px",
+    borderRadius: "12px",
+    background: "#ffffff",
+    color: "#111827",
+    border: "1px solid #e5e7eb",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.04)"
   },
   // Main Layout
   mainGrid: {
     display: "grid",
-    gridTemplateColumns: "240px 1fr",
-    gap: "32px",
+    gridTemplateColumns: "360px 1fr",
+    gap: "24px",
     alignItems: "start"
   },
   // Sidebar
   sidebar: {
     display: "flex",
     flexDirection: "column",
-    gap: "24px",
+    gap: "16px",
     position: "sticky",
-    top: "32px"
+    top: "84px"
   },
   sectionTitle: {
     fontSize: "11px",
@@ -354,32 +325,62 @@ const styles: Record<string, CSSProperties> = {
   mainContent: {
     display: "flex",
     flexDirection: "column",
-    gap: "24px"
+    gap: "14px"
+  },
+  composerTriggerBtn: {
+    width: "34px",
+    height: "34px",
+    borderRadius: "10px",
+    border: "1px solid transparent",
+    background: "transparent",
+    color: "#3b82f6",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    boxShadow: "none",
+    transition: "background-color 0.18s ease, border-color 0.18s ease"
+  },
+  composerTriggerIcon: {
+    width: "18px",
+    height: "18px"
+  },
+  composerModalBody: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px"
   },
   // Input Area
   inputCard: {
-    background: "#fff",
-    borderRadius: "16px",
-    padding: "24px",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.02), 0 4px 16px rgba(0,0,0,0.04)"
+    background: "#fbfaf7",
+    borderRadius: "20px",
+    padding: "16px",
+    minHeight: "232px",
+    border: "1px solid #e7e2d8",
+    boxShadow: "0 8px 22px rgba(31, 41, 55, 0.06)",
+    transition: "background-color 0.22s ease, border-color 0.22s ease"
   },
   aiCard: {
-    background: "linear-gradient(135deg, #f8fafc 0%, #fff7ed 100%)",
+    background: "#fbfaf7",
     borderRadius: "20px",
-    padding: "28px",
-    border: "1px solid rgba(148, 163, 184, 0.2)",
-    boxShadow: "0 8px 24px rgba(15, 23, 42, 0.06)"
+    padding: "16px",
+    minHeight: "232px",
+    border: "1px solid #d5cebf",
+    boxShadow: "0 8px 22px rgba(31, 41, 55, 0.08)",
+    transition: "background-color 0.22s ease, border-color 0.22s ease"
   },
   aiHeader: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: "16px"
+    marginBottom: "12px",
+    gap: "8px"
   },
   aiTitle: {
-    fontSize: "18px",
+    fontSize: "20px",
     fontWeight: 700,
-    color: "#1f2937"
+    color: "#1f2937",
+    letterSpacing: "0.01em"
   },
   aiBadge: {
     fontSize: "11px",
@@ -393,11 +394,11 @@ const styles: Record<string, CSSProperties> = {
   },
   aiTextarea: {
     width: "100%",
-    minHeight: "120px",
+    minHeight: "126px",
     padding: "14px 16px",
-    borderRadius: "12px",
-    border: "1px solid #e2e8f0",
-    background: "#fff",
+    borderRadius: "10px",
+    border: "1px solid #e7e2d8",
+    background: "#ffffff",
     fontSize: "14px",
     lineHeight: 1.6,
     fontFamily: "inherit",
@@ -408,13 +409,14 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     gap: "12px",
     alignItems: "center",
-    marginTop: "12px"
+    marginTop: "12px",
+    flexWrap: "wrap"
   },
   aiButton: {
     padding: "10px 18px",
     borderRadius: "10px",
     border: "none",
-    background: "#111827",
+    background: "#3b82f6",
     color: "#f9fafb",
     fontSize: "13px",
     fontWeight: 600,
@@ -424,17 +426,44 @@ const styles: Record<string, CSSProperties> = {
   aiGhostButton: {
     padding: "10px 18px",
     borderRadius: "10px",
-    border: "1px solid #cbd5f5",
-    background: "#f8fafc",
-    color: "#1f2937",
+    border: "1px solid #d5cebf",
+    background: "#ffffff",
+    color: "#374151",
     fontSize: "13px",
     fontWeight: 600,
     cursor: "pointer",
     fontFamily: "inherit"
   },
+  modeSwitch: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    padding: "4px",
+    background: "rgba(255,255,255,0.78)",
+    borderRadius: "12px",
+    border: "1px solid #e5e7eb"
+  },
+  modeSwitchBtn: {
+    padding: "8px 16px",
+    borderRadius: "8px",
+    border: "none",
+    background: "transparent",
+    color: "#5b6472",
+    fontSize: "13px",
+    fontWeight: 600,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    transition: "background-color 0.2s ease, color 0.2s ease"
+  },
+  modeSwitchBtnActive: {
+    background: "#ffffff",
+    color: "#1f2937",
+    border: "1px solid #e5e7eb",
+    boxShadow: "0 1px 2px rgba(15,23,42,0.06)"
+  },
   aiHint: {
     fontSize: "12px",
-    color: "#6b7280"
+    color: "#5b6472"
   },
   aiPreview: {
     marginTop: "20px",
@@ -445,7 +474,7 @@ const styles: Record<string, CSSProperties> = {
   aiDayCard: {
     background: "#fff",
     borderRadius: "14px",
-    border: "1px solid #e5e7eb",
+    border: "1px solid #dbe4f8",
     padding: "16px"
   },
   aiDayHeader: {
@@ -509,6 +538,13 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "12px",
     color: "#6b7280"
   },
+  modeStage: {
+    minHeight: "156px",
+    display: "flex",
+    flexDirection: "column",
+    justifyContent: "center",
+    transition: "min-height 0.22s cubic-bezier(0.2, 0.7, 0.2, 1)"
+  },
   inputWrapper: {
     position: "relative"
   },
@@ -516,16 +552,17 @@ const styles: Record<string, CSSProperties> = {
     width: "100%",
     padding: "16px 100px 16px 20px",
     fontSize: "16px",
-    border: "2px solid #f5f5f4",
+    border: "1px solid #e7e2d8",
     borderRadius: "12px",
     outline: "none",
     transition: "all 0.2s ease",
-    background: "#fafaf9",
+    background: "#ffffff",
     fontFamily: "inherit",
-    color: "#292524"
+    color: "#1f2937"
   },
   taskInputFocus: {
-    borderColor: "#d6d3d1",
+    borderColor: "#60a5fa",
+    boxShadow: "0 0 0 3px rgba(59,130,246,0.16)",
     background: "#fff"
   },
   inputHint: {
@@ -539,8 +576,8 @@ const styles: Record<string, CSSProperties> = {
     top: "50%",
     transform: "translateY(-50%)",
     padding: "10px 20px",
-    borderRadius: "8px",
-    background: "#1c1917",
+    borderRadius: "10px",
+    background: "#3b82f6",
     color: "#fff",
     border: "none",
     fontSize: "14px",
@@ -551,28 +588,56 @@ const styles: Record<string, CSSProperties> = {
   // Board
   board: {
     display: "grid",
-    gridTemplateColumns: "repeat(3, 1fr)",
-    gap: "20px"
+    gridTemplateColumns: "1.05fr 1fr 0.95fr",
+    gap: "16px"
   },
   column: {
-    background: "#f5f5f4",
+    background: "#f8fafc",
     borderRadius: "16px",
     padding: "16px",
-    minHeight: "450px"
+    minHeight: "520px",
+    border: "1px solid #e5e7eb"
+  },
+  columnDone: {
+    background: "#f8fafc",
+    border: "1px solid #e5e7eb",
+    borderRadius: "16px",
+    padding: "16px",
+    minHeight: "520px"
+  },
+  columnDropActive: {
+    boxShadow: "inset 0 0 0 2px rgba(59,130,246,0.45), 0 10px 24px rgba(59,130,246,0.10)",
+    transform: "translateY(-2px)",
+    transition: "box-shadow 0.18s ease, transform 0.18s ease"
   },
   columnHeader: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: "16px",
+    marginBottom: "12px",
     padding: "4px"
+  },
+  columnHeaderRight: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px"
   },
   columnTitle: {
     display: "flex",
     alignItems: "center",
-    gap: "8px",
+    gap: "6px",
     fontSize: "14px",
     fontWeight: 600
+  },
+  columnTitleText: {
+    fontSize: "17px",
+    fontWeight: 700,
+    letterSpacing: "0.01em"
+  },
+  columnTitleCount: {
+    fontSize: "14px",
+    fontWeight: 600,
+    opacity: 0.82
   },
   columnDot: {
     width: "8px",
@@ -582,7 +647,7 @@ const styles: Record<string, CSSProperties> = {
   columnCount: {
     fontSize: "12px",
     fontWeight: 600,
-    color: "#78716c",
+    color: "#6b7280",
     background: "#fff",
     padding: "4px 10px",
     borderRadius: "100px"
@@ -590,106 +655,125 @@ const styles: Record<string, CSSProperties> = {
   taskList: {
     display: "flex",
     flexDirection: "column",
-    gap: "10px"
+    gap: "12px",
+    minHeight: "420px",
+    maxHeight: "calc(100vh - 260px)",
+    overflowY: "auto",
+    paddingRight: "4px"
   },
   // Task Card
   taskCard: {
     background: "#fff",
-    borderRadius: "12px",
-    padding: "16px",
-    boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
-    border: "1px solid #f5f5f4",
-    transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
-    cursor: "pointer"
+    borderRadius: "10px",
+    padding: "8px 10px",
+    border: "none",
+    boxShadow: "inset 0 0 0 1px transparent",
+    transition: "box-shadow 0.2s ease",
+    cursor: "grab"
   },
   taskCardHover: {
-    boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
-    transform: "translateY(-1px)",
-    borderColor: "#e7e5e4"
+    boxShadow: "inset 0 0 0 1px #d7dde5"
+  },
+  taskCardDone: {
+    background: "#fff",
+    borderRadius: "10px",
+    padding: "8px 10px",
+    border: "none",
+    boxShadow: "inset 0 0 0 1px transparent",
+    transition: "box-shadow 0.2s ease",
+    cursor: "grab"
+  },
+  taskCardDragging: {
+    opacity: 0.45,
+    transform: "scale(0.985)",
+    boxShadow: "0 14px 26px rgba(15,23,42,0.18)"
+  },
+  taskCardDoneHover: {
+    boxShadow: "inset 0 0 0 1px #d7dde5"
+  },
+  taskMainRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    minWidth: 0
+  },
+  taskContentDone: {
+    fontSize: "14px",
+    lineHeight: 1.4,
+    color: "#166534",
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap"
   },
   taskContent: {
     fontSize: "14px",
-    lineHeight: 1.6,
+    lineHeight: 1.4,
     color: "#292524",
-    marginBottom: "12px",
-    wordBreak: "break-word"
-  },
-  taskMeta: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingTop: "12px",
-    borderTop: "1px solid #fafaf9"
-  },
-  taskTime: {
-    fontSize: "11px",
-    color: "#a8a29e",
-    fontWeight: 500
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap"
   },
   taskActions: {
     display: "flex",
-    gap: "8px",
-    alignItems: "center"
+    gap: "0",
+    alignItems: "center",
+    opacity: 0,
+    transform: "translateY(2px)",
+    transition: "opacity 0.18s ease, transform 0.18s ease"
   },
-  actionBtn: {
-    padding: "6px 12px",
-    fontSize: "12px",
-    borderRadius: "6px",
-    border: "1px solid #e7e5e4",
-    background: "#fff",
-    color: "#57534e",
-    cursor: "pointer",
-    fontFamily: "inherit",
-    fontWeight: 500
+  taskActionGroup: {
+    display: "flex",
+    gap: "0",
+    alignItems: "center"
   },
   deleteBtn: {
-    padding: "6px 12px",
-    fontSize: "12px",
-    borderRadius: "6px",
+    width: "30px",
+    height: "30px",
+    borderRadius: "8px",
     border: "none",
     background: "transparent",
-    color: "#a8a29e",
+    color: "#9ca3af",
     cursor: "pointer",
-    fontFamily: "inherit"
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center"
   },
-  statusSelect: {
-    minWidth: "90px"
+  deleteBtnHover: {
+    color: "#b91c1c",
+    background: "#fef2f2"
   },
   // Edit Mode
-  editForm: {
+  editInline: {
     display: "flex",
-    flexDirection: "column",
-    gap: "12px"
+    alignItems: "center",
+    gap: "8px"
   },
   editInput: {
-    width: "100%",
-    padding: "12px",
+    flex: 1,
+    minWidth: 0,
+    padding: "4px 0",
     fontSize: "14px",
-    border: "1px solid #e7e5e4",
-    borderRadius: "8px",
+    border: "none",
+    background: "transparent",
     outline: "none",
-    fontFamily: "inherit"
+    fontFamily: "inherit",
+    color: "#1f2937"
   },
-  editRow: {
-    display: "flex",
-    gap: "12px",
-    alignItems: "center"
-  },
-  editLabel: {
-    fontSize: "13px",
-    color: "#78716c",
-    minWidth: "40px"
-  },
-  editActions: {
-    display: "flex",
-    gap: "8px",
-    justifyContent: "flex-end",
-    marginTop: "4px"
-  },
-  editBtn: {
-    padding: "8px 16px",
-    fontSize: "13px",
-    borderRadius: "6px"
+  backBtn: {
+    width: "30px",
+    height: "30px",
+    borderRadius: "8px",
+    border: "none",
+    background: "transparent",
+    color: "#64748b",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center"
   },
   // Empty State
   emptyState: {
@@ -723,112 +807,134 @@ const styles: Record<string, CSSProperties> = {
   }
 };
 
-// ==================== Components ====================
 function TaskCard({
   item,
   onSave,
   onDelete,
-  saving,
+  onDragStart,
+  onDragEnd,
+  isDragging,
   deleting
 }: {
   item: EditableItem;
   onSave: (item: EditableItem) => void;
   onDelete: (id: number) => void;
-  saving: boolean;
+  onDragStart: (itemId: number) => void;
+  onDragEnd: () => void;
+  isDragging: boolean;
   deleting: boolean;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedText, setEditedText] = useState(item.text_value);
-  const [editedSort, setEditedSort] = useState(item.sort);
   const [isHovered, setIsHovered] = useState(false);
+  const ignoreBlurSaveRef = useRef(false);
 
   const handleSave = () => {
-    onSave({ ...item, text_value: editedText, sort: editedSort });
+    onSave({ ...item, text_value: editedText });
     setIsEditing(false);
   };
 
   const handleCancel = () => {
     setEditedText(item.text_value);
-    setEditedSort(item.sort);
     setIsEditing(false);
-  };
-
-  const handleStatusChange = (newStatus: ItemStatus) => {
-    if (newStatus !== item.status) {
-      onSave({ ...item, status: newStatus });
-    }
   };
 
   if (isEditing) {
     return (
       <div style={styles.taskCard}>
-        <div style={styles.editForm}>
+        <div style={styles.editInline}>
           <input
             type="text"
             value={editedText}
             onChange={(e) => setEditedText(e.target.value)}
             style={styles.editInput}
             autoFocus
+            onBlur={() => {
+              if (ignoreBlurSaveRef.current) {
+                ignoreBlurSaveRef.current = false;
+                return;
+              }
+              handleSave();
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter") handleSave();
-              if (e.key === "Escape") handleCancel();
+              if (e.key === "Escape") {
+                e.preventDefault();
+                handleCancel();
+              }
             }}
           />
-          <div style={styles.editRow}>
-            <span style={styles.editLabel}>排序</span>
-            <InputNumber
-              min={0}
-              value={editedSort}
-              onChange={(v) => setEditedSort(typeof v === "number" ? v : 0)}
-              style={{ width: "80px" }}
-              size="small"
-            />
-          </div>
-          <div style={styles.editActions}>
-            <Button style={styles.editBtn} onClick={handleCancel}>
-              取消
-            </Button>
-            <Button type="primary" style={styles.editBtn} onClick={handleSave} loading={saving}>
-              保存
-            </Button>
-          </div>
+          <button
+            type="button"
+            style={styles.backBtn}
+            title="返回"
+            onMouseDown={() => {
+              ignoreBlurSaveRef.current = true;
+            }}
+            onClick={handleCancel}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M10 6l-6 6 6 6M5 12h15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
         </div>
       </div>
     );
   }
 
+  const isDone = item.status === 2;
+  const contentText = item.text_value ?? "";
+
   return (
     <div
       style={{
-        ...styles.taskCard,
-        ...(isHovered ? styles.taskCardHover : {})
+        ...(isDone ? styles.taskCardDone : styles.taskCard),
+        ...(isHovered ? (isDone ? styles.taskCardDoneHover : styles.taskCardHover) : {}),
+        ...(isDragging ? styles.taskCardDragging : {})
       }}
+      draggable
+      onDoubleClick={() => setIsEditing(true)}
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", String(item.id));
+        onDragStart(item.id);
+      }}
+      onDragEnd={onDragEnd}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <div style={styles.taskContent}>
-        {item.text_value || <em style={{ color: "#a8a29e" }}>无内容</em>}
-      </div>
-      
-      <div style={styles.taskMeta}>
-        <span style={styles.taskTime}>
-          {new Date(item.updated_time).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
-        </span>
-        
-        <div style={styles.taskActions}>
-          <Select
-            value={item.status}
-            options={statusOptions}
-            onChange={(v) => handleStatusChange(Number(v) as ItemStatus)}
-            style={styles.statusSelect}
-            size="small"
-          />
-          <button style={styles.actionBtn} onClick={() => setIsEditing(true)}>
-            编辑
-          </button>
-          <button style={styles.deleteBtn} onClick={() => onDelete(item.id)} disabled={deleting}>
-            {deleting ? "..." : "删除"}
-          </button>
+      <div style={styles.taskMainRow}>
+        <div style={isDone ? styles.taskContentDone : styles.taskContent}>
+          {contentText || <em style={{ color: "#a8a29e" }}>无内容</em>}
+        </div>
+        <div
+          style={{
+            ...styles.taskActions,
+            ...(isHovered ? { opacity: 1, transform: "translateY(0)" } : {})
+          }}
+        >
+          <div style={styles.taskActionGroup}>
+            <button
+              style={{
+                ...styles.deleteBtn,
+                ...(isHovered && !deleting ? styles.deleteBtnHover : {})
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(item.id);
+              }}
+              disabled={deleting}
+              title="删除"
+            >
+              {deleting ? (
+                "..."
+              ) : (
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M4 7h16M9.5 11v6M14.5 11v6M8 7l1-2h6l1 2M7.5 7l.6 11.1c.03.53.47.94 1 .94h5.8c.53 0 .97-.41 1-.94L16.5 7" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -900,24 +1006,33 @@ function TimeSlotItem({
 }
 
 // ==================== Main Component ====================
-export default function Workday() {
+export default function Workday({ aiConfigured = true }: { aiConfigured?: boolean }) {
   const [date, setDate] = useState(() => formatDate(new Date()));
-  const [record, setRecord] = useState<DailyRecord | null>(null);
+  const [_record, setRecord] = useState<DailyRecord | null>(null);
   const [timeSlots, setTimeSlots] = useState<EditableSlot[]>([]);
   const [items, setItems] = useState<EditableItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [savingItemId, setSavingItemId] = useState<number | null>(null);
   const [deletingItemId, setDeletingItemId] = useState<number | null>(null);
+  const [draggingItemId, setDraggingItemId] = useState<number | null>(null);
+  const [dropStatus, setDropStatus] = useState<ItemStatus | null>(null);
   const [creatingItem, setCreatingItem] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
   const [newTaskText, setNewTaskText] = useState("");
-  const [isInputFocused, setIsInputFocused] = useState(false);
   const [aiInput, setAiInput] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
   const [aiSubmitting, setAiSubmitting] = useState(false);
   const [aiDays, setAiDays] = useState<NormalizedWorkDay[]>([]);
+  const [isAiMode, setIsAiMode] = useState(false);
+  const [monthOverview, setMonthOverview] = useState<MonthOverviewResponse | null>(null);
+  const [isNarrow, setIsNarrow] = useState(resolveIsNarrow);
+  const [calendarMonth, setCalendarMonth] = useState(() => toMonthValue(date));
 
-  const dateInfo = useMemo(() => formatDisplayDate(date), [date]);
+  useEffect(() => {
+    if (!aiConfigured && isAiMode) {
+      setIsAiMode(false);
+    }
+  }, [aiConfigured, isAiMode]);
 
   const loadDay = useCallback(async () => {
     setLoading(true);
@@ -938,6 +1053,40 @@ export default function Workday() {
     void loadDay();
   }, [loadDay]);
 
+  useEffect(() => {
+    const loadMonthOverview = async () => {
+      try {
+        const data = await requestJson<MonthOverviewResponse>(
+          `/api/work/month-overview?month=${calendarMonth}`
+        );
+        setMonthOverview(data);
+      } catch {
+        setMonthOverview(null);
+      }
+    };
+    void loadMonthOverview();
+  }, [calendarMonth]);
+
+  useEffect(() => {
+    setCalendarMonth(toMonthValue(date));
+  }, [date]);
+
+  useEffect(() => {
+    const onResize = () => setIsNarrow(resolveIsNarrow());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
+    if (!error) return;
+    notification.error({
+      message: "操作失败",
+      description: error,
+      placement: "bottomRight"
+    });
+    setError(null);
+  }, [error]);
+
   const groupedItems = useMemo(() => {
     const groups: Record<ItemStatus, EditableItem[]> = { 0: [], 1: [], 2: [] };
     items.forEach((item) => groups[item.status].push(item));
@@ -946,13 +1095,6 @@ export default function Workday() {
     });
     return groups;
   }, [items]);
-
-  const stats = useMemo(() => ({
-    total: items.length,
-    todo: groupedItems[0].length,
-    inProgress: groupedItems[1].length,
-    done: groupedItems[2].length
-  }), [groupedItems, items.length]);
 
   const handleAddSlot = () => {
     setTimeSlots((prev) => [
@@ -989,7 +1131,8 @@ export default function Workday() {
   };
 
   const handleCreateItem = async () => {
-    if (!newTaskText.trim()) return;
+    const content = newTaskText.trim();
+    if (!content) return;
     
     setCreatingItem(true);
     try {
@@ -998,10 +1141,11 @@ export default function Workday() {
         body: JSON.stringify({
           item_type: 0,
           status: 0,
-          text_value: newTaskText.trim()
+          text_value: content
         })
       });
       setNewTaskText("");
+      setComposerOpen(false);
       await loadDay();
     } catch (err) {
       setError(err instanceof Error ? err.message : "新增失败");
@@ -1011,7 +1155,6 @@ export default function Workday() {
   };
 
   const handleSaveItem = async (item: EditableItem) => {
-    setSavingItemId(item.id);
     try {
       await requestJson(`/api/work/items/${item.id}`, {
         method: "PUT",
@@ -1024,8 +1167,6 @@ export default function Workday() {
       await loadDay();
     } catch (err) {
       setError(err instanceof Error ? err.message : "更新失败");
-    } finally {
-      setSavingItemId(null);
     }
   };
 
@@ -1041,7 +1182,38 @@ export default function Workday() {
     }
   };
 
+  const handleDropToStatus = async (targetStatus: ItemStatus) => {
+    if (draggingItemId === null) return;
+    const dragged = items.find((item) => item.id === draggingItemId);
+    if (!dragged) {
+      setDraggingItemId(null);
+      setDropStatus(null);
+      return;
+    }
+
+    if (dragged.status === targetStatus) {
+      setDraggingItemId(null);
+      setDropStatus(null);
+      return;
+    }
+
+    if (targetStatus === 1 && !containsHttpUrl(dragged.text_value ?? "")) {
+      setError("纯文本任务不能直接进入进行中，请先补充关联链接。");
+      setDraggingItemId(null);
+      setDropStatus(null);
+      return;
+    }
+
+    await handleSaveItem({ ...dragged, status: targetStatus });
+    setDraggingItemId(null);
+    setDropStatus(null);
+  };
+
   const handleAiParse = async () => {
+    if (!aiConfigured) {
+      setError("AI 配置不完整，请先到配置页填写 AI 配置");
+      return;
+    }
     if (!aiInput.trim()) {
       setError("请输入需要解析的内容");
       return;
@@ -1050,7 +1222,7 @@ export default function Workday() {
     try {
       const data = await requestJson<NormalizedWorkList>("/api/work/normalize", {
         method: "POST",
-        body: JSON.stringify({ text: aiInput.trim() })
+        body: JSON.stringify({ text: aiInput.trim(), selectedDate: date })
       });
       setAiDays(data.days ?? []);
     } catch (err) {
@@ -1102,6 +1274,10 @@ export default function Workday() {
   };
 
   const handleAiConfirm = async () => {
+    if (!aiConfigured) {
+      setError("AI 配置不完整，无法使用自然语言输入");
+      return;
+    }
     if (aiDays.length === 0) {
       setError("没有可提交的解析结果");
       return;
@@ -1137,13 +1313,6 @@ export default function Workday() {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleCreateItem();
-    }
-  };
-
   return (
     <>
       {/* Google Fonts */}
@@ -1159,59 +1328,26 @@ export default function Workday() {
         )}
 
         <div style={styles.container}>
-          {/* Header */}
-          <header style={styles.header}>
-            <div style={styles.headerLeft}>
-              <div style={styles.dateRow}>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  style={styles.datePicker}
-                />
-                {dateInfo.isToday && <span style={styles.todayBadge}>今天</span>}
-              </div>
-              <div style={styles.dateDisplay}>
-                <span style={styles.dateMain}>{dateInfo.month}月{dateInfo.day}日</span>
-                <span style={styles.dateSub}>周{dateInfo.weekday}</span>
-              </div>
-            </div>
-            <button style={styles.refreshBtn} onClick={loadDay}>
-              刷新
-            </button>
-          </header>
-
-          {/* Stats */}
-          <div style={styles.statsBar}>
-            <div style={{ ...styles.statPill, background: STATUS_CONFIG[0].bg, color: STATUS_CONFIG[0].color }}>
-              <span>待办</span>
-              <span style={{ fontWeight: 700 }}>{stats.todo}</span>
-            </div>
-            <div style={{ ...styles.statPill, background: STATUS_CONFIG[1].bg, color: STATUS_CONFIG[1].color }}>
-              <span>进行中</span>
-              <span style={{ fontWeight: 700 }}>{stats.inProgress}</span>
-            </div>
-            <div style={{ ...styles.statPill, background: STATUS_CONFIG[2].bg, color: STATUS_CONFIG[2].color }}>
-              <span>已完成</span>
-              <span style={{ fontWeight: 700 }}>{stats.done}</span>
-            </div>
-          </div>
-
-          {error && (
-            <Alert
-              style={styles.alert}
-              type="error"
-              showIcon
-              message="操作失败"
-              description={error}
-              closable
-              onClose={() => setError(null)}
-            />
-          )}
-
-          <div style={styles.mainGrid}>
+          <div
+            style={{
+              ...styles.mainGrid,
+              gridTemplateColumns: isNarrow ? "1fr" : "360px 1fr"
+            }}
+          >
             {/* Sidebar */}
-            <aside style={styles.sidebar}>
+            <aside
+              style={{
+                ...styles.sidebar,
+                position: isNarrow ? "static" : "sticky"
+              }}
+            >
+              <TaskCalendar
+                value={date}
+                onChange={setDate}
+                statusItems={monthOverview?.days ?? []}
+                onMonthChange={setCalendarMonth}
+              />
+
               {/* Time Slots */}
               <div>
                 <div style={styles.sectionTitle}>时间段</div>
@@ -1245,144 +1381,6 @@ export default function Workday() {
 
             {/* Main Content */}
             <main style={styles.mainContent}>
-              {/* AI Parser */}
-              <section style={styles.aiCard}>
-                <div style={styles.aiHeader}>
-                  <div style={styles.aiTitle}>自然语言解析</div>
-                  <span style={styles.aiBadge}>OpenAI</span>
-                </div>
-                <textarea
-                  placeholder="例如：今天整理了需求文档，完成了接口联调；明天继续补测试。"
-                  value={aiInput}
-                  onChange={(e) => setAiInput(e.target.value)}
-                  style={styles.aiTextarea}
-                />
-                <div style={styles.aiActions}>
-                  <button
-                    style={{
-                      ...styles.aiButton,
-                      opacity: aiInput.trim() ? 1 : 0.5,
-                      cursor: aiInput.trim() ? "pointer" : "not-allowed"
-                    }}
-                    onClick={handleAiParse}
-                    disabled={!aiInput.trim() || aiLoading}
-                  >
-                    {aiLoading ? "解析中..." : "生成预览"}
-                  </button>
-                  <button
-                    style={styles.aiGhostButton}
-                    onClick={() => {
-                      setAiInput("");
-                      setAiDays([]);
-                    }}
-                  >
-                    清空
-                  </button>
-                  <span style={styles.aiHint}>
-                    解析结果可编辑，确认后批量新增到工作记录。
-                  </span>
-                </div>
-
-                {aiDays.length > 0 && (
-                  <div style={styles.aiPreview}>
-                    {aiDays.map((day, dayIndex) => (
-                      <div key={`${day.date}-${dayIndex}`} style={styles.aiDayCard}>
-                        <div style={styles.aiDayHeader}>
-                          <div style={styles.aiDayTitle}>日期</div>
-                          <input
-                            type="date"
-                            value={day.date}
-                            onChange={(e) => handleAiDayDateChange(dayIndex, e.target.value)}
-                            style={styles.datePicker}
-                          />
-                          <button
-                            style={styles.aiIconButton}
-                            onClick={() => handleAiRemoveDay(dayIndex)}
-                          >
-                            删除日期
-                          </button>
-                        </div>
-                        {day.items.map((item, itemIndex) => (
-                          <div key={`${dayIndex}-${itemIndex}`} style={styles.aiItemRow}>
-                            <input
-                              type="text"
-                              value={item}
-                              onChange={(e) =>
-                                handleAiItemChange(dayIndex, itemIndex, e.target.value)
-                              }
-                              style={styles.aiItemInput}
-                              placeholder="事项内容"
-                            />
-                            <button
-                              style={styles.aiIconButton}
-                              onClick={() => handleAiRemoveItem(dayIndex, itemIndex)}
-                            >
-                              删除
-                            </button>
-                          </div>
-                        ))}
-                        <button
-                          style={styles.aiAddItemButton}
-                          onClick={() => handleAiAddItem(dayIndex)}
-                        >
-                          + 添加事项
-                        </button>
-                      </div>
-                    ))}
-
-                    <div style={styles.aiFooter}>
-                      <button style={styles.aiGhostButton} onClick={handleAiAddDay}>
-                        + 添加日期
-                      </button>
-                      <span style={styles.aiCount}>
-                        共 {aiDays.reduce((sum, day) => sum + day.items.length, 0)} 条事项
-                      </span>
-                      <button
-                        style={{
-                          ...styles.aiButton,
-                          opacity: aiSubmitting ? 0.7 : 1
-                        }}
-                        onClick={handleAiConfirm}
-                        disabled={aiSubmitting}
-                      >
-                        {aiSubmitting ? "提交中..." : "确认并批量新增"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </section>
-
-              {/* Input */}
-              <div style={styles.inputCard}>
-                <div style={styles.inputWrapper}>
-                  <input
-                    type="text"
-                    placeholder="添加新任务..."
-                    value={newTaskText}
-                    onChange={(e) => setNewTaskText(e.target.value)}
-                    onFocus={() => setIsInputFocused(true)}
-                    onBlur={() => setIsInputFocused(false)}
-                    onKeyDown={handleKeyDown}
-                    style={{
-                      ...styles.taskInput,
-                      ...(isInputFocused ? styles.taskInputFocus : {})
-                    }}
-                  />
-                  <button
-                    style={{
-                      ...styles.addBtn,
-                      opacity: newTaskText.trim() ? 1 : 0.5,
-                      cursor: newTaskText.trim() ? "pointer" : "not-allowed"
-                    }}
-                    onClick={handleCreateItem}
-                    disabled={!newTaskText.trim() || creatingItem}
-                  >
-                    {creatingItem ? "..." : "添加"}
-                  </button>
-                </div>
-                <div style={styles.inputHint}>按 Enter 快速添加</div>
-              </div>
-
               {/* Board */}
               <div style={styles.board}>
                 {([0, 1, 2] as ItemStatus[]).map((status) => {
@@ -1390,13 +1388,70 @@ export default function Workday() {
                   const groupItems = groupedItems[status];
 
                   return (
-                    <div key={status} style={styles.column}>
+                    <div
+                      key={status}
+                      style={{
+                        ...(status === 2 ? styles.columnDone : styles.column),
+                        ...(dropStatus === status ? styles.columnDropActive : {})
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = "move";
+                        if (dropStatus !== status) setDropStatus(status);
+                      }}
+                      onDragLeave={(e) => {
+                        const next = e.relatedTarget as Node | null;
+                        if (!next || !e.currentTarget.contains(next)) {
+                          setDropStatus((prev) => (prev === status ? null : prev));
+                        }
+                      }}
+                      onDrop={async (e) => {
+                        e.preventDefault();
+                        await handleDropToStatus(status);
+                      }}
+                    >
                       <div style={styles.columnHeader}>
                         <div style={styles.columnTitle}>
-                          <span style={{ ...styles.columnDot, background: config.color }} />
-                          <span style={{ color: config.color }}>{config.label}</span>
+                          <span style={{ ...styles.columnTitleText, color: config.color }}>
+                            {config.label}
+                          </span>
+                          <span
+                            style={{
+                              ...styles.columnTitleCount,
+                              color: "#6b7280",
+                            }}
+                          >
+                            {groupItems.length}
+                          </span>
                         </div>
-                        <span style={styles.columnCount}>{groupItems.length}</span>
+                        <div style={styles.columnHeaderRight}>
+                          {status === 0 ? (
+                            <button
+                              style={{
+                                ...styles.composerTriggerBtn,
+                                color: config.color
+                              }}
+                              onClick={() => setComposerOpen(true)}
+                              title="新建任务或自然语言解析"
+                              type="button"
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.backgroundColor = "rgba(59,130,246,0.08)";
+                                e.currentTarget.style.borderColor = "rgba(59,130,246,0.18)";
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.backgroundColor = "transparent";
+                                e.currentTarget.style.borderColor = "transparent";
+                              }}
+                            >
+                              <svg style={styles.composerTriggerIcon} viewBox="0 0 24 24" fill="none">
+                                <path d="M4 20h4l10-10-4-4L4 16v4z" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+                                <path d="M12.5 6.5l4 4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                              </svg>
+                            </button>
+                          ) : (
+                            <span style={{ width: "34px", height: "34px" }} />
+                          )}
+                        </div>
                       </div>
 
                       <div style={styles.taskList}>
@@ -1412,7 +1467,12 @@ export default function Workday() {
                               item={item}
                               onSave={handleSaveItem}
                               onDelete={handleDeleteItem}
-                              saving={savingItemId === item.id}
+                              onDragStart={setDraggingItemId}
+                              onDragEnd={() => {
+                                setDraggingItemId(null);
+                                setDropStatus(null);
+                              }}
+                              isDragging={draggingItemId === item.id}
                               deleting={deletingItemId === item.id}
                             />
                           ))
@@ -1426,6 +1486,174 @@ export default function Workday() {
           </div>
         </div>
       </div>
+      <Modal
+        title={isAiMode ? "自然语言解析" : "添加新任务"}
+        open={composerOpen}
+        onCancel={() => {
+          setComposerOpen(false);
+          setNewTaskText("");
+          setAiInput("");
+          setAiDays([]);
+        }}
+        footer={null}
+        centered
+        width={860}
+      >
+        <div style={styles.composerModalBody}>
+          <div style={styles.modeSwitch}>
+            <button
+              style={{
+                ...styles.modeSwitchBtn,
+                ...(!isAiMode ? styles.modeSwitchBtnActive : {})
+              }}
+              onClick={() => setIsAiMode(false)}
+            >
+              添加新任务
+            </button>
+            <button
+              style={{
+                ...styles.modeSwitchBtn,
+                ...(isAiMode ? styles.modeSwitchBtnActive : {}),
+                ...(!aiConfigured ? { opacity: 0.45, cursor: "not-allowed" } : {})
+              }}
+              onClick={() => {
+                if (!aiConfigured) {
+                  setError("AI 配置不完整，请先到配置页填写 AI 配置");
+                  return;
+                }
+                setIsAiMode(true);
+              }}
+              disabled={!aiConfigured}
+            >
+              自然语言解析
+            </button>
+          </div>
+
+          {!isAiMode ? (
+            <>
+              <textarea
+                placeholder="输入任务内容（支持粘贴链接）"
+                value={newTaskText}
+                onChange={(e) => setNewTaskText(e.target.value)}
+                style={{
+                  ...styles.aiTextarea,
+                  minHeight: "128px"
+                }}
+              />
+              <div style={styles.aiActions}>
+                <button
+                  style={{
+                    ...styles.aiButton,
+                    opacity: newTaskText.trim() ? 1 : 0.5,
+                    cursor: newTaskText.trim() ? "pointer" : "not-allowed"
+                  }}
+                  onClick={handleCreateItem}
+                  disabled={!newTaskText.trim() || creatingItem}
+                >
+                  {creatingItem ? "添加中..." : "+ 添加任务"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <textarea
+                placeholder="例如：今天整理了需求文档，完成了接口联调；明天继续补测试。"
+                value={aiInput}
+                onChange={(e) => setAiInput(e.target.value)}
+                style={styles.aiTextarea}
+              />
+              <div style={styles.aiActions}>
+                <button
+                  style={{
+                    ...styles.aiButton,
+                    opacity: aiInput.trim() ? 1 : 0.5,
+                    cursor: aiInput.trim() ? "pointer" : "not-allowed"
+                  }}
+                  onClick={handleAiParse}
+                  disabled={!aiInput.trim() || aiLoading}
+                >
+                  {aiLoading ? "解析中..." : "生成预览"}
+                </button>
+                <button
+                  style={styles.aiGhostButton}
+                  onClick={() => {
+                    setAiInput("");
+                    setAiDays([]);
+                  }}
+                >
+                  清空
+                </button>
+              </div>
+
+              {aiDays.length > 0 && (
+                <div style={styles.aiPreview}>
+                  {aiDays.map((day, dayIndex) => (
+                    <div key={`${day.date}-${dayIndex}`} style={styles.aiDayCard}>
+                      <div style={styles.aiDayHeader}>
+                        <div style={styles.aiDayTitle}>日期</div>
+                        <input
+                          type="date"
+                          value={day.date}
+                          onChange={(e) => handleAiDayDateChange(dayIndex, e.target.value)}
+                          style={styles.datePicker}
+                        />
+                        <button
+                          style={styles.aiIconButton}
+                          onClick={() => handleAiRemoveDay(dayIndex)}
+                        >
+                          删除日期
+                        </button>
+                      </div>
+                      {day.items.map((item, itemIndex) => (
+                        <div key={`${dayIndex}-${itemIndex}`} style={styles.aiItemRow}>
+                          <input
+                            type="text"
+                            value={item}
+                            onChange={(e) => handleAiItemChange(dayIndex, itemIndex, e.target.value)}
+                            style={styles.aiItemInput}
+                            placeholder="事项内容"
+                          />
+                          <button
+                            style={styles.aiIconButton}
+                            onClick={() => handleAiRemoveItem(dayIndex, itemIndex)}
+                          >
+                            删除
+                          </button>
+                        </div>
+                      ))}
+                      <button
+                        style={styles.aiAddItemButton}
+                        onClick={() => handleAiAddItem(dayIndex)}
+                      >
+                        + 添加事项
+                      </button>
+                    </div>
+                  ))}
+
+                  <div style={styles.aiFooter}>
+                    <button style={styles.aiGhostButton} onClick={handleAiAddDay}>
+                      + 添加日期
+                    </button>
+                    <span style={styles.aiCount}>
+                      共 {aiDays.reduce((sum, day) => sum + day.items.length, 0)} 条事项
+                    </span>
+                    <button
+                      style={{
+                        ...styles.aiButton,
+                        opacity: aiSubmitting ? 0.7 : 1
+                      }}
+                      onClick={handleAiConfirm}
+                      disabled={aiSubmitting}
+                    >
+                      {aiSubmitting ? "提交中..." : "确认并批量新增"}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </Modal>
     </>
   );
 }

@@ -85,6 +85,17 @@ describe("WorkService", () => {
     await service.deleteItem(item.id);
     await expect(service.updateItem(item.id, { status: 0 })).rejects.toThrow("记录项不存在");
   });
+
+  it("normalize requires selectedDate when using object input", async () => {
+    await expect(
+      // @ts-expect-error intentionally missing selectedDate for validation
+      service.normalizeWork({ text: "随便写点东西" })
+    ).rejects.toThrow("selectedDate 不能为空");
+
+    await expect(
+      service.normalizeWork({ text: "随便写点东西", selectedDate: "2026/02/02" })
+    ).rejects.toThrow("selectedDate 格式必须为 YYYY-MM-DD");
+  });
 });
 
 class InMemoryWorkRepository implements WorkRepository {
@@ -102,6 +113,16 @@ class InMemoryWorkRepository implements WorkRepository {
   async replaceSlots(date: string, slots: WorkSlot[]): Promise<void> {
     const stored = slots.map((slot) => ({ ...slot, id: this.nextSlotId++ }));
     this.slotsByDate.set(date, stored);
+  }
+
+  async getSlotsByDateRange(startDate: string, endDate: string): Promise<WorkSlot[]> {
+    const result: WorkSlot[] = [];
+    for (const [date, slots] of this.slotsByDate.entries()) {
+      if (date >= startDate && date <= endDate) {
+        result.push(...slots);
+      }
+    }
+    return result;
   }
 
   async findRecordByDate(date: string): Promise<DailyRecord | null> {
@@ -129,9 +150,29 @@ class InMemoryWorkRepository implements WorkRepository {
     }
   }
 
+  async getRecordsByDateRange(startDate: string, endDate: string): Promise<DailyRecord[]> {
+    const result: DailyRecord[] = [];
+    for (const record of this.recordsByDate.values()) {
+      if (record.work_date >= startDate && record.work_date <= endDate) {
+        result.push(record);
+      }
+    }
+    // Keep deterministic order for tests.
+    result.sort((a, b) => a.work_date.localeCompare(b.work_date));
+    return result;
+  }
+
   async getItemsByRecordId(recordId: number): Promise<RecordItem[]> {
     const record = [...this.recordsByDate.values()].find((item) => item.id === recordId);
     return record ? [...record.items] : [];
+  }
+
+  async getItemsByRecordIds(recordIds: number[]): Promise<RecordItem[]> {
+    const result: RecordItem[] = [];
+    for (const id of recordIds) {
+      result.push(...(await this.getItemsByRecordId(id)));
+    }
+    return result;
   }
 
   async getNextItemSort(recordId: number): Promise<number> {

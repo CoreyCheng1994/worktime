@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import mysql, { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
+import { isDbConfigured, loadRuntimeConfig } from "../system/runtime-config";
 import { DailyRecord, RecordItem, WorkSlot } from "./work.types";
 import { WorkRepository } from "./work.repository";
 
@@ -36,34 +37,12 @@ interface SlotRow extends RowDataPacket {
 
 @Injectable()
 export class MySqlWorkRepository implements WorkRepository {
-  private pool: Pool;
-
-  constructor() {
-    const host = process.env.DB_HOST || "localhost";
-    const port = Number(process.env.DB_PORT || 3306);
-    const user = process.env.DB_USER;
-    const password = process.env.DB_PASSWORD;
-    const database = process.env.DB_NAME || "worktime";
-
-    if (!user || !password) {
-      throw new Error("缺少数据库配置，请设置 DB_USER 与 DB_PASSWORD");
-    }
-
-    this.pool = mysql.createPool({
-      host,
-      port,
-      user,
-      password,
-      database,
-      connectionLimit: 10,
-      dateStrings: true,
-      supportBigNumbers: true,
-      bigNumberStrings: true
-    });
-  }
+  private pool: Pool | null = null;
+  private poolFingerprint = "";
 
   async getSlotsByDate(date: string): Promise<WorkSlot[]> {
-    const [rows] = await this.pool.query<SlotRow[]>(
+    const pool = await this.getPool();
+    const [rows] = await pool.query<SlotRow[]>(
       "SELECT * FROM work_time_slot WHERE work_date = ? ORDER BY sort ASC, id ASC",
       [date]
     );
@@ -71,7 +50,8 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   async getSlotsByDateRange(startDate: string, endDate: string): Promise<WorkSlot[]> {
-    const [rows] = await this.pool.query<SlotRow[]>(
+    const pool = await this.getPool();
+    const [rows] = await pool.query<SlotRow[]>(
       "SELECT * FROM work_time_slot WHERE work_date BETWEEN ? AND ? ORDER BY work_date ASC, sort ASC, id ASC",
       [startDate, endDate]
     );
@@ -100,7 +80,8 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   async findRecordByDate(date: string): Promise<DailyRecord | null> {
-    const [rows] = await this.pool.query<RecordRow[]>(
+    const pool = await this.getPool();
+    const [rows] = await pool.query<RecordRow[]>(
       "SELECT * FROM work_daily_record WHERE work_date = ? LIMIT 1",
       [date]
     );
@@ -112,7 +93,8 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   async createRecord(date: string, now: string): Promise<DailyRecord> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const pool = await this.getPool();
+    const [result] = await pool.execute<ResultSetHeader>(
       "INSERT INTO work_daily_record (work_date, created_time, updated_time) VALUES (?, ?, ?)",
       [date, now, now]
     );
@@ -126,14 +108,16 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   async updateRecordUpdatedTime(recordId: number, updatedTime: string): Promise<void> {
-    await this.pool.execute(
+    const pool = await this.getPool();
+    await pool.execute(
       "UPDATE work_daily_record SET updated_time = ? WHERE id = ?",
       [updatedTime, recordId]
     );
   }
 
   async getRecordsByDateRange(startDate: string, endDate: string): Promise<DailyRecord[]> {
-    const [rows] = await this.pool.query<RecordRow[]>(
+    const pool = await this.getPool();
+    const [rows] = await pool.query<RecordRow[]>(
       "SELECT * FROM work_daily_record WHERE work_date BETWEEN ? AND ? ORDER BY work_date ASC, id ASC",
       [startDate, endDate]
     );
@@ -141,7 +125,8 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   async getItemsByRecordId(recordId: number): Promise<RecordItem[]> {
-    const [rows] = await this.pool.query<ItemRow[]>(
+    const pool = await this.getPool();
+    const [rows] = await pool.query<ItemRow[]>(
       "SELECT * FROM work_record_item WHERE record_id = ? ORDER BY sort ASC, id ASC",
       [recordId]
     );
@@ -152,7 +137,8 @@ export class MySqlWorkRepository implements WorkRepository {
     if (recordIds.length === 0) {
       return [];
     }
-    const [rows] = await this.pool.query<ItemRow[]>(
+    const pool = await this.getPool();
+    const [rows] = await pool.query<ItemRow[]>(
       "SELECT * FROM work_record_item WHERE record_id IN (?) ORDER BY record_id ASC, sort ASC, id ASC",
       [recordIds]
     );
@@ -160,7 +146,8 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   async getNextItemSort(recordId: number): Promise<number> {
-    const [rows] = await this.pool.query<RowDataPacket[]>(
+    const pool = await this.getPool();
+    const [rows] = await pool.query<RowDataPacket[]>(
       "SELECT MAX(sort) AS maxSort FROM work_record_item WHERE record_id = ?",
       [recordId]
     );
@@ -172,7 +159,8 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   async insertItem(recordId: number, item: RecordItem): Promise<RecordItem> {
-    const [result] = await this.pool.execute<ResultSetHeader>(
+    const pool = await this.getPool();
+    const [result] = await pool.execute<ResultSetHeader>(
       "INSERT INTO work_record_item (record_id, item_type, status, text_value, ref_uid, progress_start, progress_end, sort, created_time, updated_time) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         recordId,
@@ -192,7 +180,8 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   async findItemById(itemId: number): Promise<RecordItem | null> {
-    const [rows] = await this.pool.query<ItemRow[]>(
+    const pool = await this.getPool();
+    const [rows] = await pool.query<ItemRow[]>(
       "SELECT * FROM work_record_item WHERE id = ? LIMIT 1",
       [itemId]
     );
@@ -203,7 +192,8 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   async updateItem(item: RecordItem): Promise<void> {
-    await this.pool.execute(
+    const pool = await this.getPool();
+    await pool.execute(
       "UPDATE work_record_item SET status = ?, text_value = ?, ref_uid = ?, progress_start = ?, progress_end = ?, sort = ?, updated_time = ? WHERE id = ?",
       [
         item.status,
@@ -219,7 +209,8 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   async deleteItem(itemId: number): Promise<void> {
-    await this.pool.execute("DELETE FROM work_record_item WHERE id = ?", [itemId]);
+    const pool = await this.getPool();
+    await pool.execute("DELETE FROM work_record_item WHERE id = ?", [itemId]);
   }
 
   private mapRecordRow = (row: RecordRow): DailyRecord => {
@@ -261,7 +252,8 @@ export class MySqlWorkRepository implements WorkRepository {
   };
 
   private async withTransaction(task: (connection: PoolConnection) => Promise<void>) {
-    const connection = await this.pool.getConnection();
+    const pool = await this.getPool();
+    const connection = await pool.getConnection();
     try {
       await connection.beginTransaction();
       await task(connection);
@@ -272,5 +264,42 @@ export class MySqlWorkRepository implements WorkRepository {
     } finally {
       connection.release();
     }
+  }
+
+  private async getPool(): Promise<Pool> {
+    const config = loadRuntimeConfig();
+    if (!isDbConfigured(config)) {
+      throw new Error("数据库配置不完整，请在设置页填写 MySQL 配置");
+    }
+
+    const fingerprint = [
+      config.db.host,
+      config.db.port,
+      config.db.user,
+      config.db.password,
+      config.db.name
+    ].join("|");
+
+    if (this.pool && this.poolFingerprint === fingerprint) {
+      return this.pool;
+    }
+
+    if (this.pool) {
+      await this.pool.end();
+    }
+
+    this.pool = mysql.createPool({
+      host: config.db.host,
+      port: Number(config.db.port),
+      user: config.db.user,
+      password: config.db.password,
+      database: config.db.name,
+      connectionLimit: 10,
+      dateStrings: true,
+      supportBigNumbers: true,
+      bigNumberStrings: true
+    });
+    this.poolFingerprint = fingerprint;
+    return this.pool;
   }
 }

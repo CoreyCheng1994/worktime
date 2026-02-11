@@ -1,10 +1,29 @@
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
 :root {
   color-scheme: light;
+  --bg-page: #f4f1ea;
+  --bg-surface: #fbfaf7;
+  --bg-elevated: #ffffff;
+  --text-primary: #1f2937;
+  --text-secondary: #5b6472;
+  --text-muted: #8a93a1;
+  --border-soft: #e7e2d8;
+  --border-strong: #d5cebf;
+  --brand: #3b82f6;
+  --brand-press: #2563eb;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
   margin: 0;
-  background: #f6f2eb;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: "Space Grotesk", "PingFang SC", "Noto Sans SC", sans-serif;
+  overflow-y: auto;
 }
 
 #app {

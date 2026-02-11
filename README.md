@@ -1,79 +1,146 @@
-# Worktime Skeleton
+# Worktime 使用指南（新手友好）
 
-一个可直接运行的前后端分离空白骨架：
-- 前端：React + Vite + TypeScript + Ant Design 6 + Zustand + React Router
-- 后端：NestJS（空壳，仅可启动）
+本指南只讲「怎么跑起来、怎么保持更新」。
+你可以把所有命令理解为两种等价写法：
+- 已安装全局命令后：`worktime <command>`
+- 未安装全局命令时：`pnpm worktime <command>`
 
-## 目录结构
-```
-repo/
-  api/
-  web/
-  package.json
-  pnpm-workspace.yaml
-  README.md
-```
+## 1. 第一次安装（推荐顺序）
 
-## 快速开始
+### 1.1 准备依赖
 ```bash
+git --version
+node -v
+pnpm -v
+```
+建议：
+- Node.js >= 20
+- pnpm >= 9
+
+### 1.2 拉代码并安装依赖
+```bash
+git clone <your-repo-url> worktime
+cd worktime
 pnpm i
-pnpm dev
 ```
 
-或分别启动：
+### 1.4 安装全局命令（可选但强烈推荐）
 ```bash
-pnpm -C web dev
-pnpm -C api dev
+pnpm worktime install
+```
+安装成功后可直接使用：
+```bash
+worktime help
 ```
 
-## 端口
-- Web: http://localhost:13018
-- API: http://localhost:13019
+## 2. 先做环境检测（强烈推荐）
 
-## 环境变量
-复制 `.env.example` 为 `.env` 并补充实际值。新增 OpenAI 相关变量用于自然语言解析接口：
-- `AI_KEY`：OpenAI API Key
-- `AI_MODEL`：模型名称（默认 `gpt-4o-mini`）
-- `TZ`：可选，服务器时区（用于相对日期解释）
-
-## 说明
-- `/todos` 页面完全由 Zustand store 状态驱动（loading / empty / error / ready）。
-- Ant Design 主题通过 `ConfigProvider` 的 `theme` token 驱动，无全局样式覆盖。
-- API 仅提供可启动的空壳。如需健康检查，可以在 `api/src` 新增 `HealthController` 并在 `AppModule` 中注册，例如 `GET /health -> { status: "ok" }`。
-
-## 自然语言解析接口
-`POST /work/normalize`：传入自然语言，返回特定日期范围的每日工作清单（由 OpenAI 解析）。
-
-示例请求体：
-```json
-{
-  "text": "下周一到周三，每天上午写周报，下午开会，周二完成 REF 1001 进度 20-40。"
-}
+```bash
+worktime doctor
+# 或 pnpm worktime doctor
 ```
 
-示例响应体（简化结构，仅文本数组）：
-```json
-{
-  "days": [
-    {
-      "date": "2026-02-02",
-      "items": ["09:00-10:00 写周报", "下午开会"]
-    }
-  ]
-}
+这个命令会检测：
+- 必要命令（node/pnpm/git）
+- 环境文件是否存在
+- 端口占用
+- 网络可达性（含 npm 官方源与国内镜像）
+
+如果你没有 VPN，`doctor` 会给出国内可访问方案建议（例如 `npmmirror`）。
+
+## 3. 启动项目（生产单进程）
+
+### 3.1 一键启动并打开浏览器
+```bash
+worktime
+# 等价于 worktime open
 ```
 
-## 批量添加任务接口
-`POST /work/batch-items`：批量新增记录项（TEXT 类型，状态固定为完成）。
+### 3.2 常用启动/停止命令
+```bash
+worktime start
+worktime status
+worktime logs
+worktime stop
+worktime restart
+```
 
-示例请求体：
-```json
-{
-  "days": [
-    {
-      "date": "2026-02-02",
-      "items": ["写周报", "下午开会"]
-    }
-  ]
-}
+默认访问地址：
+- `http://localhost:13119`
+
+## 4. 注册开机自启（macOS）
+
+```bash
+worktime autostart enable
+worktime autostart status
+worktime autostart disable
+```
+
+## 5. 更新项目（小白推荐）
+
+### 最推荐：单命令更新
+```bash
+worktime update
+```
+这条命令会自动执行：
+1. 检查本地是否有未提交改动（有则停止，避免覆盖）
+2. `git pull --ff-only`
+3. 停服务、重新安装依赖和构建
+4. 重启服务
+
+### 手动更新（等价流程）
+```bash
+git pull --ff-only
+worktime refresh
+```
+
+> 你要求的“更新前先 git pull”已固化在 `worktime update` 里。
+
+## 6. 配置页面说明
+
+启动后进入：
+- `http://localhost:<API_PORT>/settings`
+
+可在配置页完成：
+- MySQL 配置
+- AI 配置
+- MCP 路由开关
+- 本机 AI CLI 的 MCP 集成开关（Codex / Claude / Gemini / Kimi）
+
+## 7. MCP 相关命令
+
+### 7.1 HTTP MCP（默认跟服务同进程）
+服务启动后自动提供 `/mcp`。
+
+### 7.2 stdio MCP（给本地 AI CLI）
+```bash
+worktime mcp
+```
+
+## 8. 命令总览
+
+```bash
+worktime open
+worktime start
+worktime stop
+worktime restart
+worktime status
+worktime logs
+worktime build
+worktime doctor
+worktime refresh
+worktime update
+worktime mcp
+worktime install
+worktime autostart enable|disable|status
+```
+
+---
+
+如果你要让 agent 帮你一键安装/修复，建议直接发：
+
+```text
+请在当前项目执行 worktime doctor，根据 FAIL/WARN 自动修复；
+如果网络无法访问境外源，优先改成国内可访问方案；
+修复后执行 worktime start 并验证 settings 页可用。
 ```

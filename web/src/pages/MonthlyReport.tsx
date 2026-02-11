@@ -1,4 +1,5 @@
-import { CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
+import type { CSSProperties} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Alert } from "../components/Alert";
 import { Button } from "../components/Button";
 import { Spin } from "../components/Spin";

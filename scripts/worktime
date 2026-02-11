@@ -1,0 +1,358 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ "$SOURCE" != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+RUNTIME_DIR="$HOME/.worktime"
+PID_FILE="$RUNTIME_DIR/worktime.pid"
+LOG_FILE="$RUNTIME_DIR/worktime.log"
+LAUNCH_AGENT_LABEL="com.corey.worktime"
+LAUNCH_AGENT_FILE="$HOME/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
+
+get_env_file() {
+  echo "$REPO_ROOT/.env"
+}
+
+load_env_value() {
+  local key="$1"
+  local file
+  file="$(get_env_file)"
+
+  if [ -f "$file" ]; then
+    local value
+    value="$(grep -E "^${key}=" "$file" | tail -n 1 | cut -d '=' -f2- || true)"
+    if [ -n "$value" ]; then
+      echo "$value"
+      return
+    fi
+  fi
+
+  echo ""
+}
+
+get_prod_api_port() {
+  local port
+  port="$(load_env_value "API_PORT")"
+  if [ -n "$port" ]; then
+    echo "$port"
+    return
+  fi
+
+  echo "13119"
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing command: $1"
+    exit 1
+  fi
+}
+
+is_running() {
+  if [ -f "$PID_FILE" ]; then
+    local pid
+    pid="$(cat "$PID_FILE")"
+    if [ -n "$pid" ] && kill -0 "$pid" >/dev/null 2>&1; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+build_all() {
+  require_cmd pnpm
+  cd "$REPO_ROOT"
+  pnpm install --frozen-lockfile
+  pnpm build
+}
+
+update_project() {
+  require_cmd git
+  cd "$REPO_ROOT"
+
+  if [ ! -d "$REPO_ROOT/.git" ]; then
+    echo "Current directory is not a git repository: $REPO_ROOT"
+    echo "Please pull/update the source code manually, then run: worktime refresh"
+    exit 1
+  fi
+
+  if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "Detected uncommitted local changes."
+    echo "Please commit or stash changes before running update."
+    exit 1
+  fi
+
+  echo "Pulling latest code..."
+  git pull --ff-only
+
+  echo "Refreshing worktime..."
+  "$REPO_ROOT/scripts/worktime-refresh"
+}
+
+start_daemon() {
+  mkdir -p "$RUNTIME_DIR"
+
+  if is_running; then
+    echo "worktime is already running (pid $(cat "$PID_FILE"))."
+    return
+  fi
+
+  if [ ! -f "$REPO_ROOT/api/dist/main.js" ] || [ ! -f "$REPO_ROOT/web/dist/index.html" ]; then
+    echo "Build artifacts not found. Running build..."
+    build_all
+  fi
+
+  : > "$LOG_FILE"
+  cd "$REPO_ROOT"
+
+  local env_file
+  env_file="$(get_env_file)"
+  if [ ! -f "$env_file" ]; then
+    echo "Missing env file: $env_file"
+    echo "Create .env"
+    exit 1
+  fi
+
+  NODE_ENV="production" DOTENV_CONFIG_PATH="$env_file" nohup node api/dist/main.js >> "$LOG_FILE" 2>&1 &
+  echo $! > "$PID_FILE"
+
+  sleep 1
+  if is_running; then
+    local api_port
+    api_port="$(get_prod_api_port)"
+    echo "worktime started (pid $(cat "$PID_FILE"))."
+    echo "web: http://localhost:${api_port}"
+    echo "api docs: http://localhost:${api_port}/docs"
+  else
+    echo "worktime failed to start. Check logs: $LOG_FILE"
+    exit 1
+  fi
+}
+
+stop_daemon() {
+  if ! [ -f "$PID_FILE" ]; then
+    echo "worktime is not running."
+    return
+  fi
+
+  local pid
+  pid="$(cat "$PID_FILE")"
+
+  if kill -0 "$pid" >/dev/null 2>&1; then
+    kill "$pid"
+    sleep 1
+    if kill -0 "$pid" >/dev/null 2>&1; then
+      kill -9 "$pid"
+    fi
+    echo "worktime stopped."
+  else
+    echo "stale pid file removed."
+  fi
+
+  rm -f "$PID_FILE"
+}
+
+status_daemon() {
+  local api_port
+  api_port="$(get_prod_api_port)"
+
+  if is_running; then
+    echo "worktime is running (pid $(cat "$PID_FILE"))."
+    echo "web: http://localhost:${api_port}"
+    echo "api docs: http://localhost:${api_port}/docs"
+  else
+    echo "worktime is not running."
+  fi
+}
+
+install_cmd() {
+  local target="/usr/local/bin/worktime"
+  if [ ! -w "/usr/local/bin" ]; then
+    echo "Need sudo to install into /usr/local/bin"
+    echo "Run: sudo ln -sf \"$REPO_ROOT/scripts/worktime\" \"$target\""
+    return 1
+  fi
+
+  ln -sf "$REPO_ROOT/scripts/worktime" "$target"
+  echo "Installed: $target"
+  return 0
+}
+
+open_browser() {
+  require_cmd open
+
+  start_daemon
+
+  local api_port
+  api_port="$(get_prod_api_port)"
+  open "http://localhost:${api_port}"
+  echo "opened: http://localhost:${api_port}"
+}
+
+autostart_enable() {
+  mkdir -p "$HOME/Library/LaunchAgents"
+
+  if ! command -v worktime >/dev/null 2>&1; then
+    echo "worktime command not found in PATH."
+    echo "Run: sudo ln -sf \"$REPO_ROOT/scripts/worktime\" /usr/local/bin/worktime"
+    exit 1
+  fi
+
+  cat > "$LAUNCH_AGENT_FILE" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>${LAUNCH_AGENT_LABEL}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>worktime</string>
+      <string>daemon-start</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>WorkingDirectory</key>
+    <string>${REPO_ROOT}</string>
+    <key>StandardOutPath</key>
+    <string>${LOG_FILE}</string>
+    <key>StandardErrorPath</key>
+    <string>${LOG_FILE}</string>
+  </dict>
+</plist>
+PLIST
+
+  launchctl unload "$LAUNCH_AGENT_FILE" >/dev/null 2>&1 || true
+  launchctl load "$LAUNCH_AGENT_FILE"
+  echo "autostart enabled: $LAUNCH_AGENT_FILE"
+}
+
+autostart_disable() {
+  launchctl unload "$LAUNCH_AGENT_FILE" >/dev/null 2>&1 || true
+  rm -f "$LAUNCH_AGENT_FILE"
+  echo "autostart disabled"
+}
+
+autostart_status() {
+  if [ -f "$LAUNCH_AGENT_FILE" ]; then
+    echo "autostart configured: $LAUNCH_AGENT_FILE"
+    launchctl list | grep "$LAUNCH_AGENT_LABEL" || true
+  else
+    echo "autostart not configured"
+  fi
+}
+
+show_help() {
+  cat <<HELP
+Usage: worktime [command]
+
+Commands:
+  open                 Start daemon if needed, then open in browser
+  start|daemon-start   Build if needed, then start as background daemon
+  mcp                  Start stdio MCP server (for AI CLI integration)
+  doctor               Check local runtime prerequisites and print conclusion
+  stop                 Stop background daemon
+  restart              Restart background daemon
+  status               Show daemon status
+  logs                 Tail daemon logs
+  build                Build web + api
+  install              Install command to /usr/local/bin/worktime
+  refresh              Stop + rebuild + install + restart
+  update               git pull --ff-only, then refresh
+  autostart enable     Enable macOS login autostart
+  autostart disable    Disable macOS login autostart
+  autostart status     Show autostart status
+  help                 Show this help
+
+Without command, defaults to: open
+HELP
+}
+
+cmd="${1:-open}"
+subcmd="${2:-}"
+
+case "$cmd" in
+  open)
+    open_browser
+    ;;
+  mcp)
+    cd "$REPO_ROOT"
+    if [ ! -f "$REPO_ROOT/api/dist/mcp/server.js" ]; then
+      echo "MCP build artifact not found. Running build..."
+      build_all
+    fi
+    env_file=""
+    env_file="$(get_env_file)"
+    if [ -f "$env_file" ]; then
+      NODE_ENV="production" DOTENV_CONFIG_PATH="$env_file" node api/dist/mcp/server.js
+    else
+      NODE_ENV="production" node api/dist/mcp/server.js
+    fi
+    ;;
+  doctor)
+    "$REPO_ROOT/scripts/check-worktime-env.sh"
+    ;;
+  start|daemon-start)
+    start_daemon
+    ;;
+  stop)
+    stop_daemon
+    ;;
+  restart)
+    stop_daemon || true
+    start_daemon
+    ;;
+  status)
+    status_daemon
+    ;;
+  logs)
+    mkdir -p "$RUNTIME_DIR"
+    touch "$LOG_FILE"
+    tail -n 100 -f "$LOG_FILE"
+    ;;
+  build)
+    build_all
+    ;;
+  install)
+    install_cmd
+    ;;
+  refresh)
+    "$REPO_ROOT/scripts/worktime-refresh"
+    ;;
+  update)
+    update_project
+    ;;
+  autostart)
+    case "$subcmd" in
+      enable)
+        autostart_enable
+        ;;
+      disable)
+        autostart_disable
+        ;;
+      status)
+        autostart_status
+        ;;
+      *)
+        echo "Usage: worktime autostart {enable|disable|status}"
+        exit 1
+        ;;
+    esac
+    ;;
+  help|-h|--help)
+    show_help
+    ;;
+  *)
+    echo "Unknown command: $cmd"
+    show_help
+    exit 1
+    ;;
+esac

@@ -9,6 +9,7 @@ import {
 import {
   BatchCreateInput,
   CreateItemInput,
+  MonthOverviewResponse,
   NormalizedWorkList,
   NormalizeWorkInput,
   MonthlyReportResponse,
@@ -18,6 +19,7 @@ import {
   WorkSlot
 } from "./work.types";
 import { WORK_REPOSITORY, WorkRepository } from "./work.repository";
+import { isAiConfigured, loadRuntimeConfig } from "../system/runtime-config";
 
 const DEFAULT_SLOTS: Array<Pick<WorkSlot, "start_time" | "end_time" | "sort">> = [
   { start_time: "09:30:00", end_time: "12:00:00", sort: 0 },
@@ -243,18 +245,7 @@ export class WorkService {
   }
 
   async getMonthReport(month: string): Promise<MonthlyReportResponse> {
-    if (!MONTH_PATTERN.test(month)) {
-      throw new BadRequestException("月份格式必须为 YYYY-MM");
-    }
-    const [yearStr, monthStr] = month.split("-");
-    const year = Number(yearStr);
-    const monthIndex = Number(monthStr);
-    if (!Number.isInteger(year) || !Number.isInteger(monthIndex) || monthIndex < 1 || monthIndex > 12) {
-      throw new BadRequestException("月份格式必须为 YYYY-MM");
-    }
-
-    const startDate = `${yearStr}-${monthStr}-01`;
-    const endDate = this.getMonthEndDate(year, monthIndex);
+    const { yearStr, monthStr, startDate, endDate } = this.parseMonthRange(month);
 
     const records = await this.repo.getRecordsByDateRange(startDate, endDate);
     const recordIds = records.map((record) => record.id);
@@ -326,6 +317,44 @@ export class WorkService {
     };
   }
 
+  async getMonthOverview(month: string): Promise<MonthOverviewResponse> {
+    const { yearStr, monthStr, startDate, endDate } = this.parseMonthRange(month);
+    const records = await this.repo.getRecordsByDateRange(startDate, endDate);
+    const recordIds = records.map((record) => record.id);
+    const items = await this.repo.getItemsByRecordIds(recordIds);
+
+    const overviewByDate = new Map<string, { total: number; completed: number; pending: number }>();
+    records.forEach((record) => {
+      overviewByDate.set(record.work_date, { total: 0, completed: 0, pending: 0 });
+    });
+
+    const dateByRecordId = new Map<number, string>();
+    records.forEach((record) => {
+      dateByRecordId.set(record.id, record.work_date);
+    });
+
+    items.forEach((item) => {
+      if (item.item_type !== 0) return;
+      const date = dateByRecordId.get(item.record_id);
+      if (!date) return;
+      const overview = overviewByDate.get(date) ?? { total: 0, completed: 0, pending: 0 };
+      overview.total += 1;
+      if (item.status === 2) {
+        overview.completed += 1;
+      } else {
+        overview.pending += 1;
+      }
+      overviewByDate.set(date, overview);
+    });
+
+    return {
+      month: `${yearStr}-${monthStr}`,
+      days: Array.from(overviewByDate.entries())
+        .map(([date, overview]) => ({ date, ...overview }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+    };
+  }
+
   async normalizeWork(input: NormalizeWorkInput | string): Promise<NormalizedWorkList> {
     if (!input) {
       throw new BadRequestException("请求体不能为空");
@@ -335,19 +364,28 @@ export class WorkService {
       throw new BadRequestException("text 不能为空");
     }
 
-    const apiKey = process.env.AI_KEY;
-    if (!apiKey) {
-      throw new InternalServerErrorException("缺少 AI_KEY");
+    const selectedDate = typeof input === "string" ? null : input.selectedDate;
+    if (typeof input !== "string") {
+      if (typeof selectedDate !== "string" || selectedDate.trim() === "") {
+        throw new BadRequestException("selectedDate 不能为空");
+      }
+      if (!DATE_PATTERN.test(selectedDate)) {
+        throw new BadRequestException("selectedDate 格式必须为 YYYY-MM-DD");
+      }
     }
-    const aiUrl = process.env.AI_URL;
-    if (!aiUrl) {
-      throw new InternalServerErrorException("缺少 AI_URL");
+
+    const config = loadRuntimeConfig();
+    if (!isAiConfigured(config)) {
+      throw new InternalServerErrorException("AI 配置不完整，请先在设置页填写");
     }
-    const timezone = process.env.TZ || "UTC";
-    const model = process.env.AI_MODEL || "gpt-4o-mini";
+    const apiKey = config.ai.key;
+    const aiUrl = config.ai.url;
+    const timezone = config.ai.timezone || "UTC";
+    const model = config.ai.model || "gpt-4o-mini";
     const today = this.formatLocalDate(new Date());
-    const defaultRangeStart = today;
-    const defaultRangeEnd = today;
+    const baseDate = selectedDate ?? today;
+    const defaultRangeStart = baseDate;
+    const defaultRangeEnd = baseDate;
 
     const systemPrompt = [
       "你是一个结构化信息抽取器。",
@@ -355,6 +393,8 @@ export class WorkService {
       "输出必须严格符合给定 JSON schema，不要输出多余文本。",
       "只允许输出文本列表，items 为字符串数组。",
       "日期格式：YYYY-MM-DD。",
+      `今日日期（以时区 ${timezone} 计算）：${today}。`,
+      `当前选择日期（本次默认解析单日范围）：${baseDate}。`,
       "只使用服务端默认的日期范围，不要在输出中包含范围字段。",
       "默认范围为单日（服务端提供的日期），必须覆盖范围内每一天（没有事项也要给空数组）。",
       "如果存在相对时间（如'下周三'），以提供的今天/时区为基准。",
@@ -388,7 +428,7 @@ export class WorkService {
     const timeout = setTimeout(() => controller.abort(), 60000);
     let data: any;
     this.logger.log(
-      `OpenAI normalize start: model=${model}, date=${today}, timezone=${timezone}, inputLength=${text.trim().length}`
+      `OpenAI normalize start: model=${model}, today=${today}, baseDate=${baseDate}, timezone=${timezone}, inputLength=${text.trim().length}`
     );
     try {
       const response = await fetch(aiUrl, {
@@ -456,9 +496,14 @@ export class WorkService {
       `OpenAI normalize success: days=${parsed.days?.length ?? 0}, totalItems=${parsed.days?.reduce((sum, day) => sum + day.items.length, 0) ?? 0}`
     );
 
-    parsed.days = Array.isArray(parsed.days)
-      ? [...parsed.days].sort((a, b) => a.date.localeCompare(b.date))
-      : [];
+    const days = Array.isArray(parsed.days) ? parsed.days : [];
+    const matched = days.find((day) => day?.date === baseDate);
+    parsed.days = [
+      {
+        date: baseDate,
+        items: Array.isArray(matched?.items) ? matched!.items : []
+      }
+    ];
 
     return parsed;
   }
@@ -616,6 +661,22 @@ export class WorkService {
     const dayIndex = new Date(`${date}T00:00:00`).getDay();
     const labels = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
     return labels[dayIndex] ?? "";
+  }
+
+  private parseMonthRange(month: string) {
+    if (!MONTH_PATTERN.test(month)) {
+      throw new BadRequestException("月份格式必须为 YYYY-MM");
+    }
+    const [yearStr, monthStr] = month.split("-");
+    const year = Number(yearStr);
+    const monthIndex = Number(monthStr);
+    if (!Number.isInteger(year) || !Number.isInteger(monthIndex) || monthIndex < 1 || monthIndex > 12) {
+      throw new BadRequestException("月份格式必须为 YYYY-MM");
+    }
+
+    const startDate = `${yearStr}-${monthStr}-01`;
+    const endDate = this.getMonthEndDate(year, monthIndex);
+    return { yearStr, monthStr, startDate, endDate };
   }
 
   private getMonthEndDate(year: number, month: number) {

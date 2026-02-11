@@ -19,12 +19,14 @@ ReactDOM.createRoot(root).render(
     <ConfigProvider
       theme={{
         token: {
-          colorPrimary: "#2F5D3F",
-          colorBgBase: "#F6F2EB",
-          borderRadius: 8,
+          colorPrimary: "#3b82f6",
+          colorBgBase: "#f4f1ea",
+          colorTextBase: "#1f2937",
+          colorBorder: "#e7e2d8",
+          borderRadius: 10,
           fontSize: 14,
           fontFamily:
-            "\"LXGW WenKai\", \"PingFang SC\", \"Hiragino Sans GB\", \"Microsoft YaHei\", sans-serif"
+            "\"Space Grotesk\", \"PingFang SC\", \"Noto Sans SC\", sans-serif"
         },
         algorithm: antdTheme.defaultAlgorithm
       }}

@@ -3,11 +3,19 @@
   "private": true,
   "packageManager": "pnpm@9.12.0",
   "scripts": {
+    "build": "pnpm -C web build && pnpm -C api build",
+    "start": "pnpm run start:prod",
     "dev": "pnpm -r --parallel dev",
     "dev:web": "pnpm -C web dev",
     "dev:api": "pnpm -C api dev",
+    "lint:web": "pnpm -C web lint",
+    "governance:web": "bash scripts/scan_web_governance.sh --fail",
     "test": "pnpm -r test",
     "test:web": "pnpm -C web test",
-    "test:api": "pnpm -C api test"
+    "test:api": "pnpm -C api test",
+    "build:prod": "pnpm -C web build && pnpm -C api build",
+    "start:prod": "pnpm build && NODE_ENV=production DOTENV_CONFIG_PATH=.env node api/dist/main.js",
+    "worktime": "bash scripts/worktime",
+    "mcp:worktime": "pnpm -C api build && pnpm -C api mcp"
   }
 }

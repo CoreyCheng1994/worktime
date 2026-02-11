@@ -60,6 +60,8 @@ export interface TimeSlotInput {
 
 export interface NormalizeWorkInput {
   text: string;
+  // 当前在 UI 中选择的日期（YYYY-MM-DD），用于作为本次解析的默认单日范围。
+  selectedDate: string;
 }
 
 export interface BatchCreateInput {
@@ -99,4 +101,16 @@ export interface MonthlyReportResponse {
   totalHours: number;
   weeks: WeeklyReportBlock[];
   text: string;
+}
+
+export interface MonthOverviewDay {
+  date: string;
+  total: number;
+  completed: number;
+  pending: number;
+}
+
+export interface MonthOverviewResponse {
+  month: string;
+  days: MonthOverviewDay[];
 }

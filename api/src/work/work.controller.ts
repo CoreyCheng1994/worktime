@@ -22,6 +22,11 @@ export class WorkController {
     return await this.workService.getMonthReport(month);
   }
 
+  @Get("month-overview")
+  async getMonthOverview(@Query("month") month: string) {
+    return await this.workService.getMonthOverview(month);
+  }
+
   @Put("day/:date/slots")
   async saveSlots(@Param("date") date: string, @Body() slots: TimeSlotInput[]) {
     return await this.workService.saveSlots(date, slots);

@@ -16,6 +16,7 @@
 
 ## 编码风格与命名约定
 - 前端代码风格参考 `codestyle_frontend.md`；后端代码风格参考 `codestyle_backend.md`。
+- 如涉及任何 UI 相关代码改动（样式、布局、动效、组件视觉/交互），必须遵守根目录 `ui_style.md` 的全局规范。
 
 ## 测试指南
 - 前端使用 Vitest + Testing Library；后端使用 Jest（NestJS）。

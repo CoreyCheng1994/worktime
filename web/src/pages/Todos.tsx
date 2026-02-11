@@ -1,5 +1,10 @@
 import { useEffect, useMemo } from "react";
-import { Alert, Button, Card, Empty, Spin, Typography } from "antd";
+import { Alert } from "../components/Alert";
+import { Button } from "../components/Button";
+import { Card } from "../components/Card";
+import { Empty } from "../components/Empty";
+import { Spin } from "../components/Spin";
+import { Paragraph, Text, Title } from "../components/Typography";
 import { useTodosPageStore } from "../stores/todosPage";
 import "../styles/todos.css";
 
@@ -47,15 +52,15 @@ export default function Todos() {
     <Card
       className="todos-card"
       title={
-        <Typography.Title level={3} className="page-title">
+        <Title level={3} className="page-title">
           {title}
-        </Typography.Title>
+        </Title>
       }
     >
       {status === "loading" && (
         <div className="state-block">
           <Spin size="large" />
-          <Typography.Text className="state-text">{message}</Typography.Text>
+          <Text className="state-text">{message}</Text>
         </div>
       )}
 
@@ -74,10 +79,10 @@ export default function Todos() {
       {status === "ready" && (
         <div className="state-block">
           <Card type="inner">
-            <Typography.Paragraph>{message}</Typography.Paragraph>
-            <Typography.Text type="secondary">
+            <Paragraph>{message}</Paragraph>
+            <Text type="secondary">
               {lastUpdatedLabel}: {lastUpdatedText}
-            </Typography.Text>
+            </Text>
           </Card>
         </div>
       )}

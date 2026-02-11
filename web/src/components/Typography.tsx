@@ -1,5 +1,5 @@
-import { Typography as AntTypography, TypographyProps as AntTypographyProps } from "antd";
-import { CSSProperties, ReactNode } from "react";
+import { Typography as AntTypography } from "antd";
+import type { CSSProperties, ReactNode } from "react";
 
 const { Title: AntTitle, Text: AntText, Paragraph: AntParagraph } = AntTypography;
 

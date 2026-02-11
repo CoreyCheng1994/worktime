@@ -1,5 +1,6 @@
-import { Input as AntInput, InputNumber as AntInputNumber, InputProps as AntInputProps, InputNumberProps as AntInputNumberProps } from "antd";
-import { CSSProperties } from "react";
+import type { InputProps as AntInputProps, InputNumberProps as AntInputNumberProps } from "antd";
+import { Input as AntInput, InputNumber as AntInputNumber } from "antd";
+import type { CSSProperties } from "react";
 
 export interface InputProps extends Omit<AntInputProps, "style"> {
   style?: CSSProperties;

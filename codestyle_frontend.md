@@ -6,4 +6,4 @@
 - 组件：不允许直接使用 Ant Design 组件，必须在组件库中封装后再使用。
 - 页面：必须数据驱动（状态来源于 store/props/接口数据），避免硬编码展示。
 - 测试：使用 Vitest + Testing Library，主流程必须全部覆盖测试。
-- 工具：暂无统一格式化或 lint 工具；如新增请同步在 `package.json` 脚本中说明。
+- 工具：使用 ESLint 做基础治理（`pnpm -C web lint`；自动修复用 `pnpm -C web lint:fix`）。

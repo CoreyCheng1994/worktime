@@ -17,9 +17,8 @@ pnpm -v
 - Node.js >= 20
 - pnpm >= 9
 
-### 1.2 拉代码并安装依赖
+### 1.2 安装依赖
 ```bash
-git clone <your-repo-url> worktime
 cd worktime
 pnpm i
 ```

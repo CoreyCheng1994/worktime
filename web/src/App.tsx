@@ -38,12 +38,14 @@ export default function App() {
   }, [refreshStatus]);
 
   const dbForceConfig = !checkingStatus && Boolean(status) && !status.dbConfigured;
+  const isSettingsPage = location.pathname === "/settings";
+  const showDbConfigModal = dbForceConfig && !isSettingsPage;
 
   return (
     <Layout className="app-shell">
       <Modal
         title="必须先完成数据库配置"
-        open={dbForceConfig}
+        open={showDbConfigModal}
         closable={false}
         maskClosable={false}
         keyboard={false}
@@ -104,10 +106,13 @@ export default function App() {
 
       <Content className="app-content">
         <Routes>
-          <Route path="/" element={<Navigate to="/work" replace />} />
-          <Route path="/work" element={<Workday aiConfigured={Boolean(status?.aiConfigured)} />} />
-          <Route path="/todos" element={<Navigate to="/work" replace />} />
-          <Route path="/report" element={<MonthlyReport />} />
+          <Route path="/" element={<Navigate to={dbForceConfig ? "/settings" : "/work"} replace />} />
+          <Route
+            path="/work"
+            element={dbForceConfig ? <Navigate to="/settings" replace /> : <Workday aiConfigured={Boolean(status?.aiConfigured)} />}
+          />
+          <Route path="/todos" element={<Navigate to={dbForceConfig ? "/settings" : "/work"} replace />} />
+          <Route path="/report" element={dbForceConfig ? <Navigate to="/settings" replace /> : <MonthlyReport />} />
           <Route path="/settings" element={<Settings onConfigSaved={refreshStatus} />} />
         </Routes>
       </Content>

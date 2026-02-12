@@ -1,6 +1,5 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import * as z from "zod/v4";
-import { isAiConfigured, loadRuntimeConfig } from "../system/runtime-config";
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
@@ -42,34 +41,6 @@ interface NormalizedDays {
   days: Array<{ date: string; items: string[] }>;
 }
 
-const NORMALIZE_DAYS_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  properties: {
-    days: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          date: {
-            type: "string",
-            pattern: "^\\d{4}-\\d{2}-\\d{2}$"
-          },
-          items: {
-            type: "array",
-            items: {
-              type: "string"
-            }
-          }
-        },
-        required: ["date", "items"]
-      }
-    }
-  },
-  required: ["days"]
-} as const;
-
 const normalizedDaysZod = z.object({
   days: z.array(
     z.object({
@@ -79,22 +50,9 @@ const normalizedDaysZod = z.object({
   )
 });
 
-function formatLocalDate(date: Date): string {
-  const year = date.getFullYear();
-  const month = `${date.getMonth() + 1}`.padStart(2, "0");
-  const day = `${date.getDate()}`.padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
 function formatCurrentMonth(): string {
   const now = new Date();
   return `${now.getFullYear()}-${`${now.getMonth() + 1}`.padStart(2, "0")}`;
-}
-
-function ensureDate(value: string, fieldName: string): void {
-  if (!DATE_PATTERN.test(value)) {
-    throw new Error(`${fieldName} 格式必须为 YYYY-MM-DD`);
-  }
 }
 
 function ensureMonth(value: string, fieldName: string): void {
@@ -149,74 +107,34 @@ async function requestJson<T>(apiBaseUrl: string, path: string, init?: RequestIn
   return (await response.json()) as T;
 }
 
-function extractOutputText(payload: unknown): string {
-  if (!payload || typeof payload !== "object") {
-    return "";
+function stripJsonCodeFence(text: string): string {
+  const trimmed = text.trim();
+  const match = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  if (!match) {
+    return trimmed;
   }
-
-  const asRecord = payload as Record<string, unknown>;
-  const choices = asRecord.choices;
-  if (Array.isArray(choices) && choices.length > 0) {
-    const first = choices[0] as Record<string, unknown>;
-    const message = first.message as Record<string, unknown> | undefined;
-    const content = message?.content;
-    if (typeof content === "string") {
-      return content;
-    }
-  }
-
-  const outputText = asRecord.output_text;
-  if (typeof outputText === "string") {
-    return outputText;
-  }
-
-  const output = asRecord.output;
-  if (!Array.isArray(output)) {
-    return "";
-  }
-
-  const parts: string[] = [];
-  for (const item of output) {
-    const obj = item as Record<string, unknown>;
-    const content = obj.content;
-    if (!Array.isArray(content)) {
-      continue;
-    }
-    for (const piece of content) {
-      const pieceObj = piece as Record<string, unknown>;
-      if (pieceObj.type === "output_text" && typeof pieceObj.text === "string") {
-        parts.push(pieceObj.text);
-      }
-      if (pieceObj.type === "refusal" && typeof pieceObj.refusal === "string") {
-        throw new Error(`模型拒绝: ${pieceObj.refusal}`);
-      }
-    }
-  }
-  return parts.join("");
+  return match[1].trim();
 }
 
-function normalizeDaysPayload(input: NormalizedDays, fallbackDate: string): NormalizedDays {
+function normalizeDaysPayload(input: NormalizedDays): NormalizedDays {
   const bucket = new Map<string, string[]>();
 
   for (const day of input.days) {
     if (!DATE_PATTERN.test(day.date)) {
       continue;
     }
+
     const items = day.items
       .map((item) => item.trim())
       .filter((item) => item.length > 0);
+
     if (items.length === 0) {
       continue;
     }
+
     const existing = bucket.get(day.date) ?? [];
     existing.push(...items);
     bucket.set(day.date, existing);
-  }
-
-  if (bucket.size === 0) {
-    return {
-      days: [{ date: fallbackDate, items: [] }]
-    };
   }
 
   const days = Array.from(bucket.entries())
@@ -226,69 +144,54 @@ function normalizeDaysPayload(input: NormalizedDays, fallbackDate: string): Norm
   return { days };
 }
 
-async function parseNaturalLanguageToDays(text: string, selectedDate: string): Promise<NormalizedDays> {
-  const config = loadRuntimeConfig();
-  if (!isAiConfigured(config)) {
-    throw new Error("AI 配置不完整，请先在设置页填写");
+function countItems(input: NormalizedDays): number {
+  return input.days.reduce((sum, day) => sum + day.items.length, 0);
+}
+
+function parsePreparedDaysFromText(text: string): NormalizedDays {
+  const raw = stripJsonCodeFence(text);
+  let parsed: unknown;
+
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(
+      "batch_add_tasks_from_natural_language 已切换为 agent 侧解析模式：请先把自然语言整理为标准 JSON（{\"days\":[{\"date\":\"YYYY-MM-DD\",\"items\":[\"任务\"]}]})，再调用 batch_add_tasks。"
+    );
   }
-  const apiKey = config.ai.key;
-  const aiUrl = config.ai.url;
-  const model = config.ai.model || "gpt-4o-mini";
-  const timezone = config.ai.timezone || "UTC";
-  const today = formatLocalDate(new Date());
 
-  const systemPrompt = [
-    "你是一个结构化信息抽取器。",
-    "请把用户描述解析为每日任务清单。",
-    "输出必须严格符合 JSON schema，不要输出额外文本。",
-    "字段说明：days[].date 为 YYYY-MM-DD，days[].items 为任务文本数组。",
-    `今天日期（时区 ${timezone}）：${today}。`,
-    `默认参考日期：${selectedDate}。`,
-    "如果用户明确提到日期区间（如“下周一到周三”），需要展开到每一天。",
-    "如果用户只描述时间段但没有明确日期，则使用默认参考日期。",
-    "items 中保留任务文本，可包含时间描述；空任务不要输出。"
-  ].join("\n");
+  return normalizedDaysZod.parse(parsed);
+}
 
-  const body = {
-    model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: text.trim() }
-    ],
-    response_format: {
-      type: "json_schema",
-      json_schema: {
-        name: "worktime_days",
-        strict: true,
-        schema: NORMALIZE_DAYS_SCHEMA
-      }
-    },
-    stream: false
+async function writeBatchTasks(
+  apiBaseUrl: string,
+  normalized: NormalizedDays,
+  dryRun?: boolean
+): Promise<{ ok: boolean; dryRun: boolean; parsed: NormalizedDays; writeResult: BatchCreateResponse | null }> {
+  const totalItems = countItems(normalized);
+  if (totalItems === 0) {
+    return {
+      ok: true,
+      dryRun: true,
+      parsed: normalized,
+      writeResult: null
+    };
+  }
+
+  let writeResult: BatchCreateResponse | null = null;
+  if (!dryRun) {
+    writeResult = await requestJson<BatchCreateResponse>(apiBaseUrl, "/work/batch-items", {
+      method: "POST",
+      body: JSON.stringify(normalized)
+    });
+  }
+
+  return {
+    ok: true,
+    dryRun: Boolean(dryRun),
+    parsed: normalized,
+    writeResult
   };
-
-  const response = await fetch(aiUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
-
-  const payload = await response.json();
-  if (!response.ok) {
-    const message = (payload as { error?: { message?: string } })?.error?.message || `HTTP ${response.status}`;
-    throw new Error(`AI 请求失败: ${message}`);
-  }
-
-  const outputText = extractOutputText(payload);
-  if (!outputText) {
-    throw new Error("AI 返回为空");
-  }
-
-  const parsedRaw = JSON.parse(outputText) as unknown;
-  const parsed = normalizedDaysZod.parse(parsedRaw);
-  return normalizeDaysPayload(parsed, selectedDate);
 }
 
 export function createWorktimeMcpServer(options?: { apiBaseUrl?: string }): McpServer {
@@ -353,52 +256,25 @@ export function createWorktimeMcpServer(options?: { apiBaseUrl?: string }): McpS
   );
 
   server.registerTool(
-    "batch_add_tasks_from_natural_language",
+    "batch_add_tasks",
     {
-      description: "把自然语言解析为按日期分组的任务，并批量写入 Worktime",
+      description: "使用标准化任务数据批量写入 Worktime（建议先由 agent 解析自然语言）",
       inputSchema: {
-        text: z.string().min(1).describe("自然语言任务描述"),
-        selectedDate: z.string().regex(DATE_PATTERN).optional().describe("默认参考日期 YYYY-MM-DD（缺省为今天）"),
-        dryRun: z.boolean().optional().describe("true 时只解析不写入数据库")
+        days: z
+          .array(
+            z.object({
+              date: z.string().regex(DATE_PATTERN),
+              items: z.array(z.string())
+            })
+          )
+          .min(1)
+          .describe("标准任务数组，格式：[{ date: YYYY-MM-DD, items: [任务文本] }]"),
+        dryRun: z.boolean().optional().describe("true 时仅校验与归一化，不写入数据库")
       }
     },
-    async ({ text, selectedDate, dryRun }) => {
-      const fallbackDate = selectedDate ?? formatLocalDate(new Date());
-      ensureDate(fallbackDate, "selectedDate");
-
-      const normalized = await parseNaturalLanguageToDays(text, fallbackDate);
-      const totalItems = normalized.days.reduce((sum, day) => sum + day.items.length, 0);
-      if (totalItems === 0) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "解析完成，但没有可写入的任务。"
-            }
-          ],
-          structuredContent: {
-            ok: true,
-            dryRun: true,
-            parsed: normalized,
-            writeResult: null
-          }
-        };
-      }
-
-      let writeResult: BatchCreateResponse | null = null;
-      if (!dryRun) {
-        writeResult = await requestJson<BatchCreateResponse>(apiBaseUrl, "/work/batch-items", {
-          method: "POST",
-          body: JSON.stringify(normalized)
-        });
-      }
-
-      const structuredContent = {
-        ok: true,
-        dryRun: Boolean(dryRun),
-        parsed: normalized,
-        writeResult
-      };
+    async ({ days, dryRun }) => {
+      const normalized = normalizeDaysPayload({ days });
+      const structuredContent = await writeBatchTasks(apiBaseUrl, normalized, dryRun);
 
       return {
         content: [

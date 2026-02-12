@@ -8,6 +8,7 @@ export interface WorkRepository {
   getSlotsByDateRange(startDate: string, endDate: string): Promise<WorkSlot[]>;
 
   findRecordByDate(date: string): Promise<DailyRecord | null>;
+  findRecordById(recordId: number): Promise<DailyRecord | null>;
   createRecord(date: string, now: string): Promise<DailyRecord>;
   updateRecordUpdatedTime(recordId: number, updatedTime: string): Promise<void>;
   getRecordsByDateRange(startDate: string, endDate: string): Promise<DailyRecord[]>;

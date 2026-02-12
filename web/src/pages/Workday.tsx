@@ -693,7 +693,7 @@ const styles: Record<string, CSSProperties> = {
   },
   taskMainRow: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: "8px",
     minWidth: 0
   },
@@ -703,9 +703,9 @@ const styles: Record<string, CSSProperties> = {
     color: "#166534",
     flex: 1,
     minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap"
+    whiteSpace: "normal",
+    wordBreak: "break-word",
+    overflowWrap: "anywhere"
   },
   taskContent: {
     fontSize: "14px",
@@ -713,9 +713,9 @@ const styles: Record<string, CSSProperties> = {
     color: "#292524",
     flex: 1,
     minWidth: 0,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap"
+    whiteSpace: "normal",
+    wordBreak: "break-word",
+    overflowWrap: "anywhere"
   },
   taskActions: {
     display: "flex",
@@ -1049,23 +1049,28 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
     }
   }, [date]);
 
+  const loadMonthOverview = useCallback(async () => {
+    try {
+      const data = await requestJson<MonthOverviewResponse>(
+        `/api/work/month-overview?month=${calendarMonth}`
+      );
+      setMonthOverview(data);
+    } catch {
+      setMonthOverview(null);
+    }
+  }, [calendarMonth]);
+
+  const refreshWorkData = useCallback(async () => {
+    await Promise.all([loadDay(), loadMonthOverview()]);
+  }, [loadDay, loadMonthOverview]);
+
   useEffect(() => {
     void loadDay();
   }, [loadDay]);
 
   useEffect(() => {
-    const loadMonthOverview = async () => {
-      try {
-        const data = await requestJson<MonthOverviewResponse>(
-          `/api/work/month-overview?month=${calendarMonth}`
-        );
-        setMonthOverview(data);
-      } catch {
-        setMonthOverview(null);
-      }
-    };
     void loadMonthOverview();
-  }, [calendarMonth]);
+  }, [loadMonthOverview]);
 
   useEffect(() => {
     setCalendarMonth(toMonthValue(date));
@@ -1076,6 +1081,34 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  useEffect(() => {
+    let refreshTimer: number | null = null;
+    const eventSource = new EventSource("/api/work/events");
+    const scheduleRefresh = () => {
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+      }
+      refreshTimer = window.setTimeout(() => {
+        void refreshWorkData();
+        refreshTimer = null;
+      }, 220);
+    };
+
+    const onWorkChanged = () => {
+      scheduleRefresh();
+    };
+
+    eventSource.addEventListener("work_changed", onWorkChanged);
+
+    return () => {
+      if (refreshTimer !== null) {
+        window.clearTimeout(refreshTimer);
+      }
+      eventSource.removeEventListener("work_changed", onWorkChanged);
+      eventSource.close();
+    };
+  }, [refreshWorkData]);
 
   useEffect(() => {
     if (!error) return;
@@ -1146,7 +1179,7 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
       });
       setNewTaskText("");
       setComposerOpen(false);
-      await loadDay();
+      await refreshWorkData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "新增失败");
     } finally {
@@ -1164,7 +1197,7 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
           text_value: item.text_value.trim()
         })
       });
-      await loadDay();
+      await refreshWorkData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "更新失败");
     }
@@ -1174,7 +1207,7 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
     setDeletingItemId(id);
     try {
       await requestJson(`/api/work/items/${id}`, { method: "DELETE" });
-      await loadDay();
+      await refreshWorkData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "删除失败");
     } finally {
@@ -1305,7 +1338,7 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
       });
       setAiInput("");
       setAiDays([]);
-      await loadDay();
+      await refreshWorkData();
     } catch (err) {
       setError(err instanceof Error ? err.message : "批量新增失败");
     } finally {

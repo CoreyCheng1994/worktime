@@ -95,6 +95,7 @@ async function requestJson<T>(apiBaseUrl: string, path: string, init?: RequestIn
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "x-worktime-source": "mcp",
       ...(init?.headers ?? {})
     }
   });

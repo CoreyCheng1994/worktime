@@ -21,10 +21,20 @@ export interface RuntimeMcpConfig {
   enabled: boolean;
 }
 
+export interface RuntimeWorkSlotConfig {
+  start: string;
+  end: string;
+}
+
+export interface RuntimeWorkConfig {
+  defaultSlots: RuntimeWorkSlotConfig[];
+}
+
 export interface RuntimeConfig {
   db: RuntimeDbConfig;
   ai: RuntimeAiConfig;
   mcp: RuntimeMcpConfig;
+  work: RuntimeWorkConfig;
   updatedAt: string;
 }
 
@@ -32,6 +42,7 @@ export interface RuntimeConfigPatch {
   db?: Partial<RuntimeDbConfig>;
   ai?: Partial<RuntimeAiConfig>;
   mcp?: Partial<RuntimeMcpConfig>;
+  work?: Partial<RuntimeWorkConfig>;
 }
 
 export function getWorktimeHomeDir(): string {
@@ -60,6 +71,12 @@ function defaultRuntimeConfig(): RuntimeConfig {
     mcp: {
       enabled: true
     },
+    work: {
+      defaultSlots: [
+        { start: "09:30", end: "12:00" },
+        { start: "13:30", end: "19:00" }
+      ]
+    },
     updatedAt: new Date().toISOString()
   };
 }
@@ -82,6 +99,15 @@ function normalizeConfig(input: Partial<RuntimeConfig> | null | undefined): Runt
     },
     mcp: {
       enabled: Boolean(input?.mcp?.enabled ?? fallback.mcp.enabled)
+    },
+    work: {
+      defaultSlots:
+        input?.work?.defaultSlots && Array.isArray(input.work.defaultSlots) && input.work.defaultSlots.length > 0
+          ? input.work.defaultSlots.map((slot) => ({
+              start: String(slot?.start ?? "").trim(),
+              end: String(slot?.end ?? "").trim()
+            }))
+          : fallback.work.defaultSlots
     },
     updatedAt: input?.updatedAt ?? fallback.updatedAt
   };
@@ -151,6 +177,10 @@ export function patchRuntimeConfig(patch: RuntimeConfigPatch): RuntimeConfig {
     mcp: {
       ...current.mcp,
       ...(patch.mcp ?? {})
+    },
+    work: {
+      ...current.work,
+      ...(patch.work ?? {})
     },
     updatedAt: new Date().toISOString()
   };

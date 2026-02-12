@@ -18,6 +18,12 @@ interface SystemConfigResponse {
   mcp: {
     enabled: boolean;
   };
+  work: {
+    defaultSlots: Array<{
+      start: string;
+      end: string;
+    }>;
+  };
   configDir: string;
   configPath: string;
   updatedAt: string;
@@ -134,7 +140,8 @@ export default function Settings({ onConfigSaved }: SettingsProps) {
         method: "PUT",
         body: JSON.stringify({
           db: config.db,
-          ai: config.ai
+          ai: config.ai,
+          work: config.work
         })
       });
       await loadData();
@@ -275,6 +282,101 @@ export default function Settings({ onConfigSaved }: SettingsProps) {
           </Row>
         </Card>
 
+        <Card title="默认工作时段" bordered>
+          <Space direction="vertical" size={10} style={{ width: "100%" }}>
+            {(config.work.defaultSlots ?? []).map((slot, index) => (
+              <Row key={`slot-${index}`} gutter={[12, 8]} align="middle">
+                <Col xs={24} md={8}>
+                  <Typography.Text>开始时间</Typography.Text>
+                  <Input
+                    type="time"
+                    value={slot.start}
+                    onChange={(e) =>
+                      setConfig((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              work: {
+                                ...prev.work,
+                                defaultSlots: prev.work.defaultSlots.map((item, i) =>
+                                  i === index ? { ...item, start: e.target.value } : item
+                                )
+                              }
+                            }
+                          : prev
+                      )
+                    }
+                  />
+                </Col>
+                <Col xs={24} md={8}>
+                  <Typography.Text>结束时间</Typography.Text>
+                  <Input
+                    type="time"
+                    value={slot.end}
+                    onChange={(e) =>
+                      setConfig((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              work: {
+                                ...prev.work,
+                                defaultSlots: prev.work.defaultSlots.map((item, i) =>
+                                  i === index ? { ...item, end: e.target.value } : item
+                                )
+                              }
+                            }
+                          : prev
+                      )
+                    }
+                  />
+                </Col>
+                <Col xs={24} md={8}>
+                  <Typography.Text>&nbsp;</Typography.Text>
+                  <div>
+                    <Button
+                      danger
+                      disabled={config.work.defaultSlots.length <= 1}
+                      onClick={() =>
+                        setConfig((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                work: {
+                                  ...prev.work,
+                                  defaultSlots: prev.work.defaultSlots.filter((_, i) => i !== index)
+                                }
+                              }
+                            : prev
+                        )
+                      }
+                    >
+                      删除时段
+                    </Button>
+                  </div>
+                </Col>
+              </Row>
+            ))}
+
+            <Button
+              onClick={() =>
+                setConfig((prev) =>
+                  prev
+                    ? {
+                        ...prev,
+                        work: {
+                          ...prev.work,
+                          defaultSlots: [...prev.work.defaultSlots, { start: "09:00", end: "18:00" }]
+                        }
+                      }
+                    : prev
+                )
+              }
+            >
+              添加默认时段
+            </Button>
+          </Space>
+        </Card>
+
         <Card title="服务端 MCP 路由开关" bordered>
           <Space align="center" size={12}>
             <Switch
@@ -332,7 +434,7 @@ export default function Settings({ onConfigSaved }: SettingsProps) {
 
         <Space>
           <Button type="primary" loading={saving} onClick={() => void saveConfig()}>
-            保存数据库与 AI 配置
+            保存系统配置
           </Button>
           <Button onClick={() => void loadData()}>刷新状态</Button>
         </Space>

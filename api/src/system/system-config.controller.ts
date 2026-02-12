@@ -12,6 +12,7 @@ import {
   loadRuntimeConfig,
   patchRuntimeConfig
 } from "./runtime-config";
+const TIME_PATTERN = /^\d{2}:\d{2}(:\d{2})?$/;
 
 @Controller("system/config")
 export class SystemConfigController {
@@ -35,6 +36,28 @@ export class SystemConfigController {
       throw new BadRequestException("db.port 必须为正整数");
     }
 
+    if (patch.work?.defaultSlots !== undefined) {
+      if (!Array.isArray(patch.work.defaultSlots) || patch.work.defaultSlots.length === 0) {
+        throw new BadRequestException("work.defaultSlots 必须为非空数组");
+      }
+      patch.work.defaultSlots.forEach((slot, index) => {
+        if (!slot || typeof slot !== "object") {
+          throw new BadRequestException(`work.defaultSlots[${index}] 不能为空`);
+        }
+        if (typeof slot.start !== "string" || !TIME_PATTERN.test(slot.start)) {
+          throw new BadRequestException(`work.defaultSlots[${index}].start 格式必须为 HH:mm 或 HH:mm:ss`);
+        }
+        if (typeof slot.end !== "string" || !TIME_PATTERN.test(slot.end)) {
+          throw new BadRequestException(`work.defaultSlots[${index}].end 格式必须为 HH:mm 或 HH:mm:ss`);
+        }
+        const start = this.normalizeTime(slot.start);
+        const end = this.normalizeTime(slot.end);
+        if (this.timeToSeconds(start) >= this.timeToSeconds(end)) {
+          throw new BadRequestException(`work.defaultSlots[${index}] start 必须早于 end`);
+        }
+      });
+    }
+
     const normalizedPatch: RuntimeConfigPatch = {
       db: patch.db
         ? {
@@ -43,7 +66,15 @@ export class SystemConfigController {
           }
         : undefined,
       ai: patch.ai,
-      mcp: patch.mcp
+      mcp: patch.mcp,
+      work: patch.work?.defaultSlots
+        ? {
+            defaultSlots: patch.work.defaultSlots.map((slot) => ({
+              start: this.normalizeTime(slot.start).slice(0, 5),
+              end: this.normalizeTime(slot.end).slice(0, 5)
+            }))
+          }
+        : patch.work
     };
 
     const config = patchRuntimeConfig(normalizedPatch);
@@ -62,6 +93,16 @@ export class SystemConfigController {
       configDir: getWorktimeHomeDir(),
       configPath: getRuntimeConfigPath()
     };
+  }
+
+  private normalizeTime(value: string): string {
+    const [hour, minute, second = "00"] = value.split(":");
+    return `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}:${second.padStart(2, "0")}`;
+  }
+
+  private timeToSeconds(value: string): number {
+    const [hour, minute, second] = value.split(":").map(Number);
+    return hour * 3600 + minute * 60 + second;
   }
 
   @Get("status")

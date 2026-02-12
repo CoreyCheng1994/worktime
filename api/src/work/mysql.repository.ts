@@ -92,6 +92,19 @@ export class MySqlWorkRepository implements WorkRepository {
     return { ...record, items: [] };
   }
 
+  async findRecordById(recordId: number): Promise<DailyRecord | null> {
+    const pool = await this.getPool();
+    const [rows] = await pool.query<RecordRow[]>(
+      "SELECT * FROM work_daily_record WHERE id = ? LIMIT 1",
+      [recordId]
+    );
+    if (rows.length === 0) {
+      return null;
+    }
+    const record = this.mapRecordRow(rows[0]);
+    return { ...record, items: [] };
+  }
+
   async createRecord(date: string, now: string): Promise<DailyRecord> {
     const pool = await this.getPool();
     const [result] = await pool.execute<ResultSetHeader>(

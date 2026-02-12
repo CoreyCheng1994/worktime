@@ -20,8 +20,9 @@ import {
 } from "./work.types";
 import { WORK_REPOSITORY, WorkRepository } from "./work.repository";
 import { isAiConfigured, loadRuntimeConfig } from "../system/runtime-config";
+import { WorkEventsService } from "./work-events.service";
 
-const DEFAULT_SLOTS: Array<Pick<WorkSlot, "start_time" | "end_time" | "sort">> = [
+const FALLBACK_DEFAULT_SLOTS: Array<Pick<WorkSlot, "start_time" | "end_time" | "sort">> = [
   { start_time: "09:30:00", end_time: "12:00:00", sort: 0 },
   { start_time: "13:30:00", end_time: "19:00:00", sort: 1 }
 ];
@@ -59,7 +60,10 @@ const NORMALIZE_SCHEMA = {
 @Injectable()
 export class WorkService {
   private readonly logger = new Logger(WorkService.name);
-  constructor(@Inject(WORK_REPOSITORY) private readonly repo: WorkRepository) {}
+  constructor(
+    @Inject(WORK_REPOSITORY) private readonly repo: WorkRepository,
+    private readonly workEventsService: WorkEventsService
+  ) {}
 
   async getDay(date: string) {
     this.ensureDate(date);
@@ -106,7 +110,7 @@ export class WorkService {
     return await this.repo.getSlotsByDate(date);
   }
 
-  async createItem(date: string, input: CreateItemInput) {
+  async createItem(date: string, input: CreateItemInput, source?: string) {
     this.ensureDate(date);
     const record = await this.ensureRecord(date);
     this.ensureCreateItemInput(input);
@@ -136,11 +140,16 @@ export class WorkService {
     const items = await this.repo.getItemsByRecordId(record.id);
     record.items = this.sortItems(items);
     record.updated_time = now;
+    this.workEventsService.emitTaskChanged({
+      action: "create_item",
+      date,
+      source: this.normalizeSource(source)
+    });
 
     return created;
   }
 
-  async updateItem(itemId: number, input: UpdateItemInput) {
+  async updateItem(itemId: number, input: UpdateItemInput, source?: string) {
     const id = this.parseRequiredInt(itemId, "itemId");
     const item = await this.repo.findItemById(id);
     if (!item) {
@@ -163,10 +172,16 @@ export class WorkService {
 
     await this.repo.updateItem(updated);
     await this.repo.updateRecordUpdatedTime(updated.record_id, updated.updated_time);
+    const record = await this.repo.findRecordById(updated.record_id);
+    this.workEventsService.emitTaskChanged({
+      action: "update_item",
+      date: record?.work_date,
+      source: this.normalizeSource(source)
+    });
     return updated;
   }
 
-  async deleteItem(itemId: number) {
+  async deleteItem(itemId: number, source?: string) {
     const id = this.parseRequiredInt(itemId, "itemId");
     const item = await this.repo.findItemById(id);
     if (!item) {
@@ -175,9 +190,15 @@ export class WorkService {
 
     await this.repo.deleteItem(id);
     await this.repo.updateRecordUpdatedTime(item.record_id, this.now());
+    const record = await this.repo.findRecordById(item.record_id);
+    this.workEventsService.emitTaskChanged({
+      action: "delete_item",
+      date: record?.work_date,
+      source: this.normalizeSource(source)
+    });
   }
 
-  async createItemsBatch(input: BatchCreateInput) {
+  async createItemsBatch(input: BatchCreateInput, source?: string) {
     if (!input || typeof input !== "object") {
       throw new BadRequestException("请求体不能为空");
     }
@@ -239,6 +260,13 @@ export class WorkService {
 
       summaries.push({ date, count });
       total += count;
+      if (count > 0) {
+        this.workEventsService.emitTaskChanged({
+          action: "batch_create_items",
+          date,
+          source: this.normalizeSource(source)
+        });
+      }
     }
 
     return { ok: true, total, days: summaries };
@@ -514,6 +542,10 @@ export class WorkService {
     }
   }
 
+  private normalizeSource(source?: string): "api" | "mcp" {
+    return source === "mcp" ? "mcp" : "api";
+  }
+
   private async ensureRecord(date: string) {
     const existing = await this.repo.findRecordByDate(date);
     if (existing) {
@@ -531,22 +563,46 @@ export class WorkService {
   private async getSlotsOrDefault(date: string) {
     const slots = await this.repo.getSlotsByDate(date);
     if (slots.length === 0) {
-      return DEFAULT_SLOTS.map((slot) => ({
-        id: 0,
-        work_date: date,
-        start_time: slot.start_time,
-        end_time: slot.end_time,
-        sort: slot.sort,
-        created_time: "",
-        updated_time: ""
-      }));
+      return this.resolveDefaultSlots(date);
     }
 
     return [...slots].sort((a, b) => a.sort - b.sort);
   }
 
   private defaultSlots(date: string): WorkSlot[] {
-    return DEFAULT_SLOTS.map((slot) => ({
+    return this.resolveDefaultSlots(date);
+  }
+
+  private resolveDefaultSlots(date: string): WorkSlot[] {
+    const configured = loadRuntimeConfig().work.defaultSlots;
+    const normalized = configured
+      .map((slot, index) => {
+        try {
+          const start = this.normalizeTime(slot.start, "work.defaultSlots.start");
+          const end = this.normalizeTime(slot.end, "work.defaultSlots.end");
+          if (this.timeToSeconds(start) >= this.timeToSeconds(end)) {
+            return null;
+          }
+          return {
+            id: 0,
+            work_date: date,
+            start_time: start,
+            end_time: end,
+            sort: index,
+            created_time: "",
+            updated_time: ""
+          } satisfies WorkSlot;
+        } catch {
+          return null;
+        }
+      })
+      .filter((slot): slot is WorkSlot => Boolean(slot));
+
+    if (normalized.length > 0) {
+      return normalized;
+    }
+
+    return FALLBACK_DEFAULT_SLOTS.map((slot) => ({
       id: 0,
       work_date: date,
       start_time: slot.start_time,

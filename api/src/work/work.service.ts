@@ -9,6 +9,8 @@ import {
 import {
   BatchCreateInput,
   CreateItemInput,
+  HolidayCalendarDay,
+  HolidayMonthOverviewResponse,
   MonthOverviewResponse,
   NormalizedWorkList,
   NormalizeWorkInput,
@@ -21,6 +23,7 @@ import {
 import { WORK_REPOSITORY, WorkRepository } from "./work.repository";
 import { isAiConfigured, loadRuntimeConfig } from "../system/runtime-config";
 import { WorkEventsService } from "./work-events.service";
+import { buildHolidayDaysForYear, hasHolidayScheduleForYear } from "./holiday-calendar";
 
 const FALLBACK_DEFAULT_SLOTS: Array<Pick<WorkSlot, "start_time" | "end_time" | "sort">> = [
   { start_time: "09:30:00", end_time: "12:00:00", sort: 0 },
@@ -383,6 +386,45 @@ export class WorkService {
     };
   }
 
+  async getHolidayMonthOverview(month: string): Promise<HolidayMonthOverviewResponse> {
+    const { yearStr, monthStr, startDate, endDate } = this.parseMonthRange(month);
+    const year = Number(yearStr);
+    await this.ensureHolidayYearSynced(year);
+    const days = await this.repo.getHolidayDaysByDateRange(startDate, endDate);
+    return {
+      month: `${yearStr}-${monthStr}`,
+      days: days
+        .map((day) => ({
+          date: day.date,
+          type: day.type,
+          label: day.label,
+          name: day.name
+        }))
+        .sort((a, b) => a.date.localeCompare(b.date))
+    };
+  }
+
+  async syncHolidayCalendarForToday() {
+    const currentYear = Number(this.formatLocalDate(new Date()).slice(0, 4));
+    const targetYears = [currentYear, currentYear + 1].filter(
+      (year, index, list) => list.indexOf(year) === index
+    );
+    const syncedYears: number[] = [];
+
+    for (const year of targetYears) {
+      if (!hasHolidayScheduleForYear(year)) {
+        continue;
+      }
+      await this.ensureHolidayYearSynced(year);
+      syncedYears.push(year);
+    }
+
+    return {
+      ok: true,
+      years: syncedYears
+    };
+  }
+
   async normalizeWork(input: NormalizeWorkInput | string): Promise<NormalizedWorkList> {
     if (!input) {
       throw new BadRequestException("请求体不能为空");
@@ -733,6 +775,35 @@ export class WorkService {
     const startDate = `${yearStr}-${monthStr}-01`;
     const endDate = this.getMonthEndDate(year, monthIndex);
     return { yearStr, monthStr, startDate, endDate };
+  }
+
+  private async ensureHolidayYearSynced(year: number) {
+    if (!hasHolidayScheduleForYear(year)) {
+      return;
+    }
+    const dayCount = await this.repo.countHolidayDaysByYear(year);
+    if (dayCount > 0) {
+      return;
+    }
+    await this.syncHolidayYear(year);
+  }
+
+  private async syncHolidayYear(year: number) {
+    const holidayDays = buildHolidayDaysForYear(year);
+    if (holidayDays.length === 0) {
+      return;
+    }
+    const now = this.now();
+    const rows: HolidayCalendarDay[] = holidayDays.map((day) => ({
+      date: day.date,
+      type: day.type,
+      label: day.label,
+      name: day.name,
+      source_year: day.sourceYear,
+      created_time: now,
+      updated_time: now
+    }));
+    await this.repo.replaceHolidayDaysByYear(year, rows);
   }
 
   private getMonthEndDate(year: number, month: number) {

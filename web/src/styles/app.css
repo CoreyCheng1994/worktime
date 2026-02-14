@@ -3,6 +3,7 @@
   height: 100vh;
   background: var(--bg-page);
   overflow: hidden;
+  display: flex;
 }
 
 .app-sider {
@@ -105,7 +106,8 @@
 
 .app-content {
   padding: 14px;
-  height: 100vh;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
 }

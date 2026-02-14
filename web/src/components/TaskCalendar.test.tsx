@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { TaskCalendar } from "./TaskCalendar";
@@ -36,5 +36,36 @@ describe("TaskCalendar", () => {
     expect(onMonthChange).toHaveBeenCalledWith("2026-03");
     expect(screen.getByText("2026年3月")).toBeInTheDocument();
   });
-});
 
+  it("renders statutory holiday and makeup workday markers", () => {
+    render(
+      <TaskCalendar
+        value="2026-02-10"
+        onChange={() => {}}
+        statusItems={[]}
+        holidayItems={[
+          {
+            date: "2026-02-14",
+            type: "makeupWorkday",
+            label: "班",
+            name: "春节前补班（调休补班）"
+          },
+          {
+            date: "2026-02-15",
+            type: "statutoryHoliday",
+            label: "春节",
+            name: "春节（法定节假日）"
+          }
+        ]}
+      />
+    );
+
+    const makeupButton = screen.getByRole("button", { name: "14" });
+    const holidayButton = screen.getByRole("button", { name: "15" });
+    const makeupTag = within(makeupButton).getByText("班");
+    const holidayTag = within(holidayButton).getByText("春节");
+
+    expect(makeupTag).toHaveAttribute("title", "春节前补班（调休补班）");
+    expect(holidayTag).toHaveAttribute("title", "春节（法定节假日）");
+  });
+});

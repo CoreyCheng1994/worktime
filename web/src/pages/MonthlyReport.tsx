@@ -54,9 +54,9 @@ const requestJson = async <T,>(url: string): Promise<T> => {
 const styles: Record<string, CSSProperties> = {
   page: {
     minHeight: "100vh",
-    background: "#fafaf9",
+    background: "#f4f1ea",
     fontFamily: "'DM Sans', 'Noto Sans SC', -apple-system, sans-serif",
-    color: "#292524"
+    color: "#1f2937"
   },
   container: {
     maxWidth: "1100px",
@@ -80,12 +80,12 @@ const styles: Record<string, CSSProperties> = {
     fontSize: "38px",
     fontWeight: 600,
     margin: 0,
-    color: "#1c1917"
+    color: "#1f2937"
   },
   subtitle: {
     margin: 0,
     fontSize: "14px",
-    color: "#78716c"
+    color: "#5b6472"
   },
   controls: {
     display: "flex",
@@ -96,10 +96,10 @@ const styles: Record<string, CSSProperties> = {
   monthInput: {
     padding: "10px 14px",
     borderRadius: "8px",
-    border: "1px solid #e7e5e4",
-    background: "#fff",
+    border: "1px solid #e7e2d8",
+    background: "#ffffff",
     fontSize: "14px",
-    color: "#57534e",
+    color: "#5b6472",
     cursor: "pointer",
     outline: "none",
     fontFamily: "inherit"
@@ -111,8 +111,8 @@ const styles: Record<string, CSSProperties> = {
     marginBottom: "24px"
   },
   summaryCard: {
-    background: "#fff",
-    border: "1px solid #f5f5f4",
+    background: "#ffffff",
+    border: "1px solid #e7e2d8",
     borderRadius: "12px",
     padding: "14px 18px",
     minWidth: "140px",
@@ -120,7 +120,7 @@ const styles: Record<string, CSSProperties> = {
   },
   summaryLabel: {
     fontSize: "12px",
-    color: "#a8a29e",
+    color: "#8a93a1",
     textTransform: "uppercase",
     letterSpacing: "0.08em",
     marginBottom: "6px"
@@ -128,12 +128,12 @@ const styles: Record<string, CSSProperties> = {
   summaryValue: {
     fontSize: "20px",
     fontWeight: 600,
-    color: "#1c1917"
+    color: "#1f2937"
   },
   reportCard: {
-    background: "#fff",
+    background: "#ffffff",
     borderRadius: "16px",
-    border: "1px solid #f5f5f4",
+    border: "1px solid #e7e2d8",
     boxShadow: "0 2px 12px rgba(0,0,0,0.04)",
     padding: "20px"
   },
@@ -158,7 +158,7 @@ const styles: Record<string, CSSProperties> = {
   reportTitle: {
     fontSize: "14px",
     fontWeight: 600,
-    color: "#57534e",
+    color: "#5b6472",
     letterSpacing: "0.04em",
     textTransform: "uppercase",
     margin: 0
@@ -168,8 +168,8 @@ const styles: Record<string, CSSProperties> = {
     fontFamily: "'JetBrains Mono', 'SFMono-Regular', Menlo, monospace",
     fontSize: "13px",
     lineHeight: 1.7,
-    background: "#fcfcfb",
-    border: "1px dashed #e7e5e4",
+    background: "#fbfaf7",
+    border: "1px dashed #d5cebf",
     borderRadius: "12px",
     padding: "16px",
     minHeight: "240px"
@@ -178,28 +178,28 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     gap: "8px",
     alignItems: "center",
-    color: "#78716c",
+    color: "#5b6472",
     fontSize: "12px",
     marginTop: "8px"
   },
   weekCard: {
-    border: "1px solid #f1f1ef",
+    border: "1px solid #e7e2d8",
     borderRadius: "14px",
     padding: "16px",
-    background: "#fcfcfb"
+    background: "#fbfaf7"
   },
   weekTitle: {
     margin: 0,
     fontSize: "16px",
     fontWeight: 600,
-    color: "#1c1917",
+    color: "#1f2937",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between"
   },
   weekHours: {
     fontSize: "12px",
-    color: "#78716c",
+    color: "#5b6472",
     fontWeight: 500
   },
   dayList: {
@@ -211,30 +211,30 @@ const styles: Record<string, CSSProperties> = {
   dayCard: {
     padding: "12px",
     borderRadius: "12px",
-    background: "#fff",
-    border: "1px solid #f5f5f4"
+    background: "#ffffff",
+    border: "1px solid #e7e2d8"
   },
   dayTitle: {
     margin: 0,
     fontSize: "14px",
     fontWeight: 600,
-    color: "#44403c"
+    color: "#1f2937"
   },
   dayMeta: {
     fontSize: "12px",
-    color: "#a8a29e",
+    color: "#8a93a1",
     marginTop: "4px"
   },
   itemList: {
     margin: "10px 0 0",
     paddingLeft: "18px",
-    color: "#292524",
+    color: "#1f2937",
     lineHeight: 1.6,
     fontSize: "13px"
   },
   emptyItem: {
     fontSize: "12px",
-    color: "#a8a29e",
+    color: "#8a93a1",
     marginTop: "8px"
   },
   stack: {

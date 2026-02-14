@@ -114,3 +114,27 @@ export interface MonthOverviewResponse {
   month: string;
   days: MonthOverviewDay[];
 }
+
+export type HolidayDayType = "statutoryHoliday" | "makeupWorkday";
+
+export interface HolidayCalendarDay {
+  date: string;
+  type: HolidayDayType;
+  label: string;
+  name: string;
+  source_year: number;
+  created_time: string;
+  updated_time: string;
+}
+
+export interface HolidayMonthOverviewDay {
+  date: string;
+  type: HolidayDayType;
+  label: string;
+  name: string;
+}
+
+export interface HolidayMonthOverviewResponse {
+  month: string;
+  days: HolidayMonthOverviewDay[];
+}

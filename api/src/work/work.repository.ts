@@ -1,4 +1,4 @@
-import { DailyRecord, RecordItem, WorkSlot } from "./work.types";
+import { DailyRecord, HolidayCalendarDay, RecordItem, WorkSlot } from "./work.types";
 
 export const WORK_REPOSITORY = Symbol("WORK_REPOSITORY");
 
@@ -20,4 +20,8 @@ export interface WorkRepository {
   findItemById(itemId: number): Promise<RecordItem | null>;
   updateItem(item: RecordItem): Promise<void>;
   deleteItem(itemId: number): Promise<void>;
+
+  getHolidayDaysByDateRange(startDate: string, endDate: string): Promise<HolidayCalendarDay[]>;
+  replaceHolidayDaysByYear(sourceYear: number, days: HolidayCalendarDay[]): Promise<void>;
+  countHolidayDaysByYear(sourceYear: number): Promise<number>;
 }

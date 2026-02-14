@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { InputNumber } from "../components/Input";
 import { Spin } from "../components/Spin";
 import { Modal, notification } from "antd";
 import type { CSSProperties } from "react";
-import type { TaskCalendarDayStatusItem } from "../components/TaskCalendar";
+import type { TaskCalendarDayStatusItem, TaskCalendarHolidayItem } from "../components/TaskCalendar";
 import { TaskCalendar } from "../components/TaskCalendar";
 
 // ==================== Types ====================
@@ -49,6 +48,11 @@ interface MonthOverviewResponse {
   days: TaskCalendarDayStatusItem[];
 }
 
+interface HolidayMonthOverviewResponse {
+  month: string;
+  days: TaskCalendarHolidayItem[];
+}
+
 interface NormalizedWorkList {
   days: NormalizedWorkDay[];
 }
@@ -74,6 +78,7 @@ const formatDate = (value: Date) => {
 };
 
 const toMonthValue = (dateStr: string) => dateStr.slice(0, 7);
+const HOLIDAY_SYNC_CACHE_KEY = "worktime:holiday-sync-date";
 
 const resolveIsNarrow = () => {
   if (typeof window === "undefined") return false;
@@ -137,7 +142,7 @@ const containsHttpUrl = (text: string) => /https?:\/\/\S+/i.test(text);
 // ==================== Styles ====================
 const styles: Record<string, CSSProperties> = {
   page: {
-    minHeight: "100vh",
+    minHeight: "100%",
     background: "#f4f1ea",
     fontFamily: "'Space Grotesk', 'PingFang SC', 'Noto Sans SC', sans-serif",
     color: "#1f2937"
@@ -157,10 +162,10 @@ const styles: Record<string, CSSProperties> = {
   datePicker: {
     padding: "10px 14px",
     borderRadius: "8px",
-    border: "1px solid #e7e5e4",
-    background: "#fff",
+    border: "1px solid #e7e2d8",
+    background: "#ffffff",
     fontSize: "14px",
-    color: "#57534e",
+    color: "#5b6472",
     cursor: "pointer",
     outline: "none",
     fontFamily: "inherit"
@@ -174,13 +179,13 @@ const styles: Record<string, CSSProperties> = {
     fontFamily: "'Playfair Display', 'Noto Serif SC', serif",
     fontSize: "32px",
     fontWeight: 600,
-    color: "#1c1917",
+    color: "#1f2937",
     letterSpacing: "-0.02em",
     lineHeight: 1
   },
   dateSub: {
     fontSize: "16px",
-    color: "#78716c",
+    color: "#5b6472",
     fontWeight: 500
   },
   // Stats
@@ -199,7 +204,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "12px",
     fontSize: "13px",
     fontWeight: 600,
-    border: "1px solid #e5e7eb"
+    border: "1px solid #e7e2d8"
   },
   statMetricPill: {
     display: "flex",
@@ -209,9 +214,9 @@ const styles: Record<string, CSSProperties> = {
     padding: "14px 16px",
     borderRadius: "12px",
     background: "#ffffff",
-    color: "#111827",
-    border: "1px solid #e5e7eb",
-    boxShadow: "0 1px 2px rgba(15,23,42,0.04)"
+    color: "#1f2937",
+    border: "1px solid #e7e2d8",
+    boxShadow: "0 1px 2px rgba(31,41,55,0.04)"
   },
   // Main Layout
   mainGrid: {
@@ -231,7 +236,7 @@ const styles: Record<string, CSSProperties> = {
   sectionTitle: {
     fontSize: "11px",
     fontWeight: 600,
-    color: "#a8a29e",
+    color: "#8a93a1",
     textTransform: "uppercase",
     letterSpacing: "0.1em",
     marginBottom: "12px"
@@ -248,8 +253,8 @@ const styles: Record<string, CSSProperties> = {
     gap: "8px",
     padding: "12px",
     borderRadius: "10px",
-    background: "#fff",
-    border: "1px solid #f5f5f4"
+    background: "#ffffff",
+    border: "1px solid #e7e2d8"
   },
   slotTimeDisplay: {
     flex: 1,
@@ -257,18 +262,18 @@ const styles: Record<string, CSSProperties> = {
     alignItems: "center",
     gap: "6px",
     fontSize: "14px",
-    color: "#44403c",
+    color: "#1f2937",
     fontWeight: 500
   },
   slotTimeEdit: {
     width: "56px",
     padding: "4px 6px",
     fontSize: "13px",
-    border: "1px solid #e7e5e4",
+    border: "1px solid #e7e2d8",
     borderRadius: "6px",
     textAlign: "center",
     fontFamily: "inherit",
-    background: "#fafaf9"
+    background: "#fbfaf7"
   },
   slotDeleteBtn: {
     padding: "6px",
@@ -280,7 +285,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "6px",
     border: "none",
     background: "transparent",
-    color: "#a8a29e",
+    color: "#8a93a1",
     cursor: "pointer",
     fontSize: "16px",
     transition: "all 0.15s ease"
@@ -288,20 +293,20 @@ const styles: Record<string, CSSProperties> = {
   slotEmpty: {
     textAlign: "center",
     padding: "32px 16px",
-    color: "#a8a29e",
+    color: "#8a93a1",
     fontSize: "13px",
-    background: "#fff",
+    background: "#ffffff",
     borderRadius: "10px",
-    border: "1px dashed #e7e5e4"
+    border: "1px dashed #d5cebf"
   },
   addSlotBtn: {
     width: "100%",
     marginTop: "8px",
     padding: "12px",
     borderRadius: "10px",
-    border: "1px dashed #d6d3d1",
+    border: "1px dashed #d5cebf",
     background: "transparent",
-    color: "#78716c",
+    color: "#5b6472",
     fontSize: "13px",
     fontWeight: 500,
     cursor: "pointer",
@@ -313,8 +318,8 @@ const styles: Record<string, CSSProperties> = {
     marginTop: "8px",
     padding: "10px",
     borderRadius: "8px",
-    background: "#1c1917",
-    color: "#fafaf9",
+    background: "#1f2937",
+    color: "#fbfaf7",
     border: "none",
     fontSize: "13px",
     fontWeight: 500,
@@ -333,7 +338,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "10px",
     border: "1px solid transparent",
     background: "transparent",
-    color: "#3b82f6",
+    color: "#8a93a1",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
@@ -441,7 +446,7 @@ const styles: Record<string, CSSProperties> = {
     padding: "4px",
     background: "rgba(255,255,255,0.78)",
     borderRadius: "12px",
-    border: "1px solid #e5e7eb"
+    border: "1px solid #e7e2d8"
   },
   modeSwitchBtn: {
     padding: "8px 16px",
@@ -458,8 +463,8 @@ const styles: Record<string, CSSProperties> = {
   modeSwitchBtnActive: {
     background: "#ffffff",
     color: "#1f2937",
-    border: "1px solid #e5e7eb",
-    boxShadow: "0 1px 2px rgba(15,23,42,0.06)"
+    border: "1px solid #e7e2d8",
+    boxShadow: "0 1px 2px rgba(31,41,55,0.06)"
   },
   aiHint: {
     fontSize: "12px",
@@ -472,9 +477,9 @@ const styles: Record<string, CSSProperties> = {
     gap: "16px"
   },
   aiDayCard: {
-    background: "#fff",
+    background: "#ffffff",
     borderRadius: "14px",
-    border: "1px solid #dbe4f8",
+    border: "1px solid #e7e2d8",
     padding: "16px"
   },
   aiDayHeader: {
@@ -487,7 +492,7 @@ const styles: Record<string, CSSProperties> = {
   aiDayTitle: {
     fontSize: "13px",
     fontWeight: 600,
-    color: "#111827",
+    color: "#1f2937",
     letterSpacing: "0.02em"
   },
   aiItemRow: {
@@ -500,7 +505,7 @@ const styles: Record<string, CSSProperties> = {
     flex: 1,
     padding: "8px 10px",
     borderRadius: "8px",
-    border: "1px solid #e5e7eb",
+    border: "1px solid #e7e2d8",
     fontSize: "13px",
     fontFamily: "inherit"
   },
@@ -516,8 +521,8 @@ const styles: Record<string, CSSProperties> = {
   },
   aiAddItemButton: {
     marginTop: "8px",
-    border: "1px dashed #cbd5f5",
-    background: "#f8fafc",
+    border: "1px dashed #d5cebf",
+    background: "#fbfaf7",
     color: "#1f2937",
     borderRadius: "8px",
     padding: "8px 12px",
@@ -536,7 +541,7 @@ const styles: Record<string, CSSProperties> = {
   },
   aiCount: {
     fontSize: "12px",
-    color: "#6b7280"
+    color: "#8a93a1"
   },
   modeStage: {
     minHeight: "156px",
@@ -592,21 +597,14 @@ const styles: Record<string, CSSProperties> = {
     gap: "16px"
   },
   column: {
-    background: "#f8fafc",
+    background: "#ffffff",
     borderRadius: "16px",
     padding: "16px",
     minHeight: "520px",
-    border: "1px solid #e5e7eb"
-  },
-  columnDone: {
-    background: "#f8fafc",
-    border: "1px solid #e5e7eb",
-    borderRadius: "16px",
-    padding: "16px",
-    minHeight: "520px"
+    border: "1px solid #e7e2d8"
   },
   columnDropActive: {
-    boxShadow: "inset 0 0 0 2px rgba(59,130,246,0.45), 0 10px 24px rgba(59,130,246,0.10)",
+    boxShadow: "inset 0 0 0 2px rgba(201,166,107,0.35), 0 10px 24px rgba(201,166,107,0.08)",
     transform: "translateY(-2px)",
     transition: "box-shadow 0.18s ease, transform 0.18s ease"
   },
@@ -647,8 +645,8 @@ const styles: Record<string, CSSProperties> = {
   columnCount: {
     fontSize: "12px",
     fontWeight: 600,
-    color: "#6b7280",
-    background: "#fff",
+    color: "#5b6472",
+    background: "#f4f1ea",
     padding: "4px 10px",
     borderRadius: "100px"
   },
@@ -661,9 +659,9 @@ const styles: Record<string, CSSProperties> = {
     overflowY: "auto",
     paddingRight: "4px"
   },
-  // Task Card
-  taskCard: {
-    background: "#fff",
+  // Task Card (不同状态使用同色系极浅背景)
+  taskCardTodo: {
+    background: "#f8fafc",
     borderRadius: "10px",
     padding: "8px 10px",
     border: "none",
@@ -671,25 +669,37 @@ const styles: Record<string, CSSProperties> = {
     transition: "box-shadow 0.2s ease",
     cursor: "grab"
   },
-  taskCardHover: {
-    boxShadow: "inset 0 0 0 1px #d7dde5"
+  taskCardTodoHover: {
+    boxShadow: "inset 0 0 0 1px #bfdbfe"
+  },
+  taskCardDoing: {
+    background: "#fffaf0",
+    borderRadius: "10px",
+    padding: "8px 10px",
+    border: "none",
+    boxShadow: "inset 0 0 0 1px transparent",
+    transition: "box-shadow 0.2s ease",
+    cursor: "grab"
+  },
+  taskCardDoingHover: {
+    boxShadow: "inset 0 0 0 1px #fcd34d"
   },
   taskCardDone: {
-    background: "#fff",
+    background: "#f6f7f4",
     borderRadius: "10px",
     padding: "8px 10px",
     border: "none",
     boxShadow: "inset 0 0 0 1px transparent",
     transition: "box-shadow 0.2s ease",
     cursor: "grab"
+  },
+  taskCardDoneHover: {
+    boxShadow: "inset 0 0 0 1px #d5cebf"
   },
   taskCardDragging: {
     opacity: 0.45,
     transform: "scale(0.985)",
     boxShadow: "0 14px 26px rgba(15,23,42,0.18)"
-  },
-  taskCardDoneHover: {
-    boxShadow: "inset 0 0 0 1px #d7dde5"
   },
   taskMainRow: {
     display: "flex",
@@ -697,20 +707,10 @@ const styles: Record<string, CSSProperties> = {
     gap: "8px",
     minWidth: 0
   },
-  taskContentDone: {
-    fontSize: "14px",
-    lineHeight: 1.4,
-    color: "#166534",
-    flex: 1,
-    minWidth: 0,
-    whiteSpace: "normal",
-    wordBreak: "break-word",
-    overflowWrap: "anywhere"
-  },
   taskContent: {
     fontSize: "14px",
     lineHeight: 1.4,
-    color: "#292524",
+    color: "#1f2937",
     flex: 1,
     minWidth: 0,
     whiteSpace: "normal",
@@ -736,7 +736,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "8px",
     border: "none",
     background: "transparent",
-    color: "#9ca3af",
+    color: "#8a93a1",
     cursor: "pointer",
     display: "inline-flex",
     alignItems: "center",
@@ -769,7 +769,7 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: "8px",
     border: "none",
     background: "transparent",
-    color: "#64748b",
+    color: "#5b6472",
     cursor: "pointer",
     display: "inline-flex",
     alignItems: "center",
@@ -787,14 +787,14 @@ const styles: Record<string, CSSProperties> = {
   },
   emptyText: {
     fontSize: "13px",
-    color: "#a8a29e",
+    color: "#8a93a1",
     marginBottom: "4px"
   },
   // Loading & Alert
   loadingOverlay: {
     position: "fixed",
     inset: "0",
-    background: "rgba(250,250,249,0.8)",
+    background: "rgba(244,241,234,0.8)",
     backdropFilter: "blur(4px)",
     display: "flex",
     alignItems: "center",
@@ -809,6 +809,7 @@ const styles: Record<string, CSSProperties> = {
 
 function TaskCard({
   item,
+  status,
   onSave,
   onDelete,
   onDragStart,
@@ -817,6 +818,7 @@ function TaskCard({
   deleting
 }: {
   item: EditableItem;
+  status: ItemStatus;
   onSave: (item: EditableItem) => void;
   onDelete: (id: number) => void;
   onDragStart: (itemId: number) => void;
@@ -839,9 +841,21 @@ function TaskCard({
     setIsEditing(false);
   };
 
+  const getTaskCardStyle = () => {
+    if (status === 0) return styles.taskCardTodo;
+    if (status === 1) return styles.taskCardDoing;
+    return styles.taskCardDone;
+  };
+
+  const getTaskCardHoverStyle = () => {
+    if (status === 0) return styles.taskCardTodoHover;
+    if (status === 1) return styles.taskCardDoingHover;
+    return styles.taskCardDoneHover;
+  };
+
   if (isEditing) {
     return (
-      <div style={styles.taskCard}>
+      <div style={getTaskCardStyle()}>
         <div style={styles.editInline}>
           <input
             type="text"
@@ -882,14 +896,13 @@ function TaskCard({
     );
   }
 
-  const isDone = item.status === 2;
   const contentText = item.text_value ?? "";
 
   return (
     <div
       style={{
-        ...(isDone ? styles.taskCardDone : styles.taskCard),
-        ...(isHovered ? (isDone ? styles.taskCardDoneHover : styles.taskCardHover) : {}),
+        ...getTaskCardStyle(),
+        ...(isHovered ? getTaskCardHoverStyle() : {}),
         ...(isDragging ? styles.taskCardDragging : {})
       }}
       draggable
@@ -904,8 +917,8 @@ function TaskCard({
       onMouseLeave={() => setIsHovered(false)}
     >
       <div style={styles.taskMainRow}>
-        <div style={isDone ? styles.taskContentDone : styles.taskContent}>
-          {contentText || <em style={{ color: "#a8a29e" }}>无内容</em>}
+        <div style={styles.taskContent}>
+          {contentText || <em style={{ color: "#8a93a1" }}>无内容</em>}
         </div>
         <div
           style={{
@@ -962,7 +975,7 @@ function TimeSlotItem({
       >
         <div style={styles.slotTimeDisplay}>
           <span>{slot.start_time}</span>
-          <span style={{ color: "#d6d3d1" }}>→</span>
+          <span style={{ color: "#d5cebf" }}>→</span>
           <span>{slot.end_time}</span>
         </div>
         <button
@@ -987,7 +1000,7 @@ function TimeSlotItem({
           onChange={(e) => onUpdate(index, "start_time", e.target.value)}
           style={styles.slotTimeEdit}
         />
-        <span style={{ color: "#d6d3d1" }}>→</span>
+        <span style={{ color: "#d5cebf" }}>→</span>
         <input
           type="time"
           value={slot.end_time}
@@ -996,7 +1009,7 @@ function TimeSlotItem({
         />
       </div>
       <button
-        style={{ ...styles.slotDeleteBtn, color: "#57534e" }}
+        style={{ ...styles.slotDeleteBtn, color: "#5b6472" }}
         onClick={() => setIsEditing(false)}
       >
         ✓
@@ -1025,6 +1038,7 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
   const [aiDays, setAiDays] = useState<NormalizedWorkDay[]>([]);
   const [isAiMode, setIsAiMode] = useState(false);
   const [monthOverview, setMonthOverview] = useState<MonthOverviewResponse | null>(null);
+  const [holidayOverview, setHolidayOverview] = useState<HolidayMonthOverviewResponse | null>(null);
   const [isNarrow, setIsNarrow] = useState(resolveIsNarrow);
   const [calendarMonth, setCalendarMonth] = useState(() => toMonthValue(date));
 
@@ -1060,6 +1074,17 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
     }
   }, [calendarMonth]);
 
+  const loadHolidayOverview = useCallback(async () => {
+    try {
+      const data = await requestJson<HolidayMonthOverviewResponse>(
+        `/api/work/holiday-month?month=${calendarMonth}`
+      );
+      setHolidayOverview(data);
+    } catch {
+      setHolidayOverview(null);
+    }
+  }, [calendarMonth]);
+
   const refreshWorkData = useCallback(async () => {
     await Promise.all([loadDay(), loadMonthOverview()]);
   }, [loadDay, loadMonthOverview]);
@@ -1073,8 +1098,26 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
   }, [loadMonthOverview]);
 
   useEffect(() => {
+    void loadHolidayOverview();
+  }, [loadHolidayOverview]);
+
+  useEffect(() => {
     setCalendarMonth(toMonthValue(date));
   }, [date]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const today = formatDate(new Date());
+    const syncedDate = window.localStorage.getItem(HOLIDAY_SYNC_CACHE_KEY);
+    if (syncedDate === today) return;
+
+    window.localStorage.setItem(HOLIDAY_SYNC_CACHE_KEY, today);
+    void requestJson("/api/work/holiday-sync", { method: "POST" })
+      .then(() => loadHolidayOverview())
+      .catch(() => {
+        window.localStorage.removeItem(HOLIDAY_SYNC_CACHE_KEY);
+      });
+  }, [loadHolidayOverview]);
 
   useEffect(() => {
     const onResize = () => setIsNarrow(resolveIsNarrow());
@@ -1378,6 +1421,7 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
                 value={date}
                 onChange={setDate}
                 statusItems={monthOverview?.days ?? []}
+                holidayItems={holidayOverview?.days ?? []}
                 onMonthChange={setCalendarMonth}
               />
 
@@ -1424,7 +1468,7 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
                     <div
                       key={status}
                       style={{
-                        ...(status === 2 ? styles.columnDone : styles.column),
+                        ...styles.column,
                         ...(dropStatus === status ? styles.columnDropActive : {})
                       }}
                       onDragOver={(e) => {
@@ -1445,15 +1489,10 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
                     >
                       <div style={styles.columnHeader}>
                         <div style={styles.columnTitle}>
-                          <span style={{ ...styles.columnTitleText, color: config.color }}>
+                          <span style={{ ...styles.columnTitleText, color: "#1f2937" }}>
                             {config.label}
                           </span>
-                          <span
-                            style={{
-                              ...styles.columnTitleCount,
-                              color: "#6b7280",
-                            }}
-                          >
+                          <span style={styles.columnCount}>
                             {groupItems.length}
                           </span>
                         </div>
@@ -1468,8 +1507,8 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
                               title="新建任务或自然语言解析"
                               type="button"
                               onMouseEnter={(e) => {
-                                e.currentTarget.style.backgroundColor = "rgba(59,130,246,0.08)";
-                                e.currentTarget.style.borderColor = "rgba(59,130,246,0.18)";
+                                e.currentTarget.style.backgroundColor = "rgba(201,166,107,0.12)";
+                                e.currentTarget.style.borderColor = "rgba(201,166,107,0.25)";
                               }}
                               onMouseLeave={(e) => {
                                 e.currentTarget.style.backgroundColor = "transparent";
@@ -1498,6 +1537,7 @@ export default function Workday({ aiConfigured = true }: { aiConfigured?: boolea
                             <TaskCard
                               key={item.id}
                               item={item}
+                              status={status}
                               onSave={handleSaveItem}
                               onDelete={handleDeleteItem}
                               onDragStart={setDraggingItemId}

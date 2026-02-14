@@ -1,7 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import mysql, { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from "mysql2/promise";
 import { isDbConfigured, loadRuntimeConfig } from "../system/runtime-config";
-import { DailyRecord, RecordItem, WorkSlot } from "./work.types";
+import { DailyRecord, HolidayCalendarDay, RecordItem, WorkSlot } from "./work.types";
 import { WorkRepository } from "./work.repository";
 
 interface RecordRow extends RowDataPacket {
@@ -35,10 +35,22 @@ interface SlotRow extends RowDataPacket {
   updated_time: string;
 }
 
+interface HolidayDayRow extends RowDataPacket {
+  id: number | string;
+  holiday_date: string;
+  day_type: number;
+  day_label: string;
+  day_name: string;
+  source_year: number;
+  created_time: string;
+  updated_time: string;
+}
+
 @Injectable()
 export class MySqlWorkRepository implements WorkRepository {
   private pool: Pool | null = null;
   private poolFingerprint = "";
+  private schemaReadyFingerprint = "";
 
   async getSlotsByDate(date: string): Promise<WorkSlot[]> {
     const pool = await this.getPool();
@@ -226,6 +238,63 @@ export class MySqlWorkRepository implements WorkRepository {
     await pool.execute("DELETE FROM work_record_item WHERE id = ?", [itemId]);
   }
 
+  async getHolidayDaysByDateRange(startDate: string, endDate: string): Promise<HolidayCalendarDay[]> {
+    const pool = await this.getPool();
+    const [rows] = await pool.query<HolidayDayRow[]>(
+      "SELECT * FROM work_holiday_calendar WHERE holiday_date BETWEEN ? AND ? ORDER BY holiday_date ASC",
+      [startDate, endDate]
+    );
+    return rows.map(this.mapHolidayDayRow);
+  }
+
+  async replaceHolidayDaysByYear(sourceYear: number, days: HolidayCalendarDay[]): Promise<void> {
+    const maxAttempts = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        await this.withTransaction(async (connection) => {
+          await connection.query("DELETE FROM work_holiday_calendar WHERE source_year = ?", [sourceYear]);
+          if (days.length === 0) {
+            return;
+          }
+
+          const values = days.map((day) => [
+            day.date,
+            day.type === "statutoryHoliday" ? 1 : 2,
+            day.label,
+            day.name,
+            day.source_year,
+            day.created_time,
+            day.updated_time
+          ]);
+
+          await connection.query(
+            "INSERT INTO work_holiday_calendar (holiday_date, day_type, day_label, day_name, source_year, created_time, updated_time) VALUES ?",
+            [values]
+          );
+        });
+        return;
+      } catch (error) {
+        if (!this.isRetryableLockError(error) || attempt >= maxAttempts) {
+          throw error;
+        }
+        await this.sleep(attempt * 40);
+      }
+    }
+  }
+
+  async countHolidayDaysByYear(sourceYear: number): Promise<number> {
+    const pool = await this.getPool();
+    const [rows] = await pool.query<RowDataPacket[]>(
+      "SELECT COUNT(*) AS total FROM work_holiday_calendar WHERE source_year = ?",
+      [sourceYear]
+    );
+    const total = rows[0]?.total;
+    if (total === null || total === undefined) {
+      return 0;
+    }
+    return Number(total);
+  }
+
   private mapRecordRow = (row: RecordRow): DailyRecord => {
     return {
       id: Number(row.id),
@@ -264,6 +333,18 @@ export class MySqlWorkRepository implements WorkRepository {
     };
   };
 
+  private mapHolidayDayRow = (row: HolidayDayRow): HolidayCalendarDay => {
+    return {
+      date: row.holiday_date,
+      type: Number(row.day_type) === 1 ? "statutoryHoliday" : "makeupWorkday",
+      label: row.day_label,
+      name: row.day_name,
+      source_year: Number(row.source_year),
+      created_time: row.created_time,
+      updated_time: row.updated_time
+    };
+  };
+
   private async withTransaction(task: (connection: PoolConnection) => Promise<void>) {
     const pool = await this.getPool();
     const connection = await pool.getConnection();
@@ -294,11 +375,16 @@ export class MySqlWorkRepository implements WorkRepository {
     ].join("|");
 
     if (this.pool && this.poolFingerprint === fingerprint) {
+      if (this.schemaReadyFingerprint !== fingerprint) {
+        await this.ensureRuntimeSchema(this.pool);
+        this.schemaReadyFingerprint = fingerprint;
+      }
       return this.pool;
     }
 
     if (this.pool) {
       await this.pool.end();
+      this.schemaReadyFingerprint = "";
     }
 
     this.pool = mysql.createPool({
@@ -313,6 +399,54 @@ export class MySqlWorkRepository implements WorkRepository {
       bigNumberStrings: true
     });
     this.poolFingerprint = fingerprint;
-    return this.pool;
+
+    try {
+      await this.ensureRuntimeSchema(this.pool);
+      this.schemaReadyFingerprint = fingerprint;
+      return this.pool;
+    } catch (error) {
+      await this.pool.end();
+      this.pool = null;
+      this.poolFingerprint = "";
+      this.schemaReadyFingerprint = "";
+      throw error;
+    }
+  }
+
+  private async ensureRuntimeSchema(pool: Pool) {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS work_holiday_calendar (
+        id           BIGINT PRIMARY KEY AUTO_INCREMENT,
+        holiday_date DATE NOT NULL,
+        day_type     TINYINT NOT NULL,
+        day_label    VARCHAR(16) NOT NULL,
+        day_name     VARCHAR(64) NOT NULL,
+        source_year  SMALLINT NOT NULL,
+        created_time DATETIME NOT NULL,
+        updated_time DATETIME NOT NULL,
+        UNIQUE KEY uk_holiday_date (holiday_date),
+        KEY idx_source_year (source_year),
+        KEY idx_holiday_date (holiday_date)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+    `);
+  }
+
+  private isRetryableLockError(error: unknown) {
+    const dbError = error as { code?: string; errno?: number } | null;
+    if (!dbError) {
+      return false;
+    }
+    return (
+      dbError.code === "ER_LOCK_DEADLOCK" ||
+      dbError.errno === 1213 ||
+      dbError.code === "ER_LOCK_WAIT_TIMEOUT" ||
+      dbError.errno === 1205
+    );
+  }
+
+  private async sleep(ms: number) {
+    await new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 }

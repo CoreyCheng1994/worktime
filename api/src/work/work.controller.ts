@@ -32,6 +32,16 @@ export class WorkController {
     return await this.workService.getMonthOverview(month);
   }
 
+  @Get("holiday-month")
+  async getHolidayMonthOverview(@Query("month") month: string) {
+    return await this.workService.getHolidayMonthOverview(month);
+  }
+
+  @Post("holiday-sync")
+  async syncHolidayCalendar() {
+    return await this.workService.syncHolidayCalendarForToday();
+  }
+
   @Sse("events")
   events(): Observable<MessageEvent> {
     return this.workEventsService.stream();

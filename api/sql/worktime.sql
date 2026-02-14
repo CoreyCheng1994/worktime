@@ -41,3 +41,18 @@ CREATE TABLE work_time_slot (
 
   KEY idx_work_date (work_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE work_holiday_calendar (
+  id           BIGINT PRIMARY KEY AUTO_INCREMENT,
+  holiday_date DATE NOT NULL,
+  day_type     TINYINT NOT NULL,      -- 1 法定节假日, 2 调休补班
+  day_label    VARCHAR(16) NOT NULL,  -- 日历标签，如“休”“班”“春节”
+  day_name     VARCHAR(64) NOT NULL,  -- 完整名称
+  source_year  SMALLINT NOT NULL,     -- 规则所属年份
+  created_time DATETIME NOT NULL,
+  updated_time DATETIME NOT NULL,
+
+  UNIQUE KEY uk_holiday_date (holiday_date),
+  KEY idx_source_year (source_year),
+  KEY idx_holiday_date (holiday_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

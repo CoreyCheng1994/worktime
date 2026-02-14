@@ -37,7 +37,7 @@ export default function App() {
     void refreshStatus();
   }, [refreshStatus]);
 
-  const dbForceConfig = !checkingStatus && Boolean(status) && !status.dbConfigured;
+  const dbForceConfig = !checkingStatus && status?.dbConfigured === false;
   const isSettingsPage = location.pathname === "/settings";
   const showDbConfigModal = dbForceConfig && !isSettingsPage;
 

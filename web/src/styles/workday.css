@@ -63,20 +63,20 @@
   text-transform: uppercase;
   letter-spacing: 0.2em;
   font-size: 12px;
-  color: #3b4a3b;
+  color: #5b6472;
 }
 
 .hero-title {
   margin: 0;
   font-family: "Fraunces", "LXGW WenKai", serif;
   font-size: 40px;
-  color: #182316;
+  color: #1f2937;
 }
 
 .hero-subtitle {
   margin: 0;
   font-size: 16px;
-  color: #2d3a2a;
+  color: #1f2937;
 }
 
 .hero-meta {
@@ -89,12 +89,12 @@
   flex-direction: column;
   gap: 4px;
   font-size: 12px;
-  color: #445046;
+  color: #5b6472;
 }
 
 .hero-meta strong {
   font-size: 16px;
-  color: #1d2a20;
+  color: #1f2937;
 }
 
 .hero-panel {
@@ -105,7 +105,7 @@
 
 .panel-label {
   font-size: 12px;
-  color: #4d5a4d;
+  color: #5b6472;
 }
 
 .panel-row {
@@ -124,7 +124,7 @@
 .panel-note {
   display: block;
   margin-top: 16px;
-  color: #6b746b;
+  color: #8a93a1;
   font-size: 12px;
 }
 
@@ -188,13 +188,13 @@
   display: grid;
   place-items: center;
   font-weight: 600;
-  color: #1f2a20;
+  color: #1f2937;
   background: rgba(255, 214, 136, 0.8);
 }
 
 .slot-sep {
   text-align: center;
-  color: #7a857a;
+  color: #5b6472;
 }
 
 .slot-empty {

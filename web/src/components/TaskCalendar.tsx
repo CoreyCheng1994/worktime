@@ -11,10 +11,20 @@ export interface TaskCalendarDayStatusItem extends TaskCalendarDayStatus {
   date: string;
 }
 
+export type TaskCalendarHolidayType = "statutoryHoliday" | "makeupWorkday";
+
+export interface TaskCalendarHolidayItem {
+  date: string;
+  type: TaskCalendarHolidayType;
+  label: string;
+  name: string;
+}
+
 interface TaskCalendarProps {
   value: string;
   onChange: (date: string) => void;
   statusItems: TaskCalendarDayStatusItem[];
+  holidayItems?: TaskCalendarHolidayItem[];
   onMonthChange?: (month: string) => void;
 }
 
@@ -57,7 +67,13 @@ const buildMonthGrid = (monthKey: string) => {
   return cells;
 };
 
-export function TaskCalendar({ value, onChange, statusItems, onMonthChange }: TaskCalendarProps) {
+export function TaskCalendar({
+  value,
+  onChange,
+  statusItems,
+  holidayItems = [],
+  onMonthChange
+}: TaskCalendarProps) {
   const [displayMonth, setDisplayMonth] = useState(() => value.slice(0, 7));
 
   useEffect(() => {
@@ -67,6 +83,10 @@ export function TaskCalendar({ value, onChange, statusItems, onMonthChange }: Ta
   const todayStr = useMemo(() => formatDate(new Date()), []);
 
   const monthCells = useMemo(() => buildMonthGrid(displayMonth), [displayMonth]);
+  const holidayByDate = useMemo(
+    () => new Map(holidayItems.map((item) => [item.date, item])),
+    [holidayItems]
+  );
 
   const titleText = useMemo(() => {
     const [yearStr, monthStr] = displayMonth.split("-");
@@ -117,6 +137,9 @@ export function TaskCalendar({ value, onChange, statusItems, onMonthChange }: Ta
           const denominator = total > 0 ? total : pending + completed;
           const pendingRatio = denominator > 0 ? Math.max(0, Math.min(1, pending / denominator)) : 0;
           const hasProgress = denominator > 0;
+          const holidayMark = holidayByDate.get(date);
+          const isStatutoryHoliday = holidayMark?.type === "statutoryHoliday";
+          const isMakeupWorkday = holidayMark?.type === "makeupWorkday";
           const radius = 10;
           const circumference = 2 * Math.PI * radius;
           const pendingArc = pendingRatio * circumference;
@@ -125,7 +148,8 @@ export function TaskCalendar({ value, onChange, statusItems, onMonthChange }: Ta
             <button
               key={date}
               type="button"
-              className={`task-calendar__day${isSelected ? " is-selected" : ""}${isToday ? " is-today" : ""}`}
+              className={`task-calendar__day${isSelected ? " is-selected" : ""}${isToday ? " is-today" : ""}${isStatutoryHoliday ? " is-holiday" : ""}${isMakeupWorkday ? " is-makeup-workday" : ""}`}
+              aria-label={String(cell.getDate())}
               onClick={() => onChange(date)}
             >
               <span className="task-calendar__day-number">
@@ -145,6 +169,15 @@ export function TaskCalendar({ value, onChange, statusItems, onMonthChange }: Ta
                 ) : null}
                 <span className="task-calendar__day-number-text">{cell.getDate()}</span>
               </span>
+              {holidayMark ? (
+                <span
+                  className={`task-calendar__day-tag${isStatutoryHoliday ? " is-holiday" : ""}${isMakeupWorkday ? " is-makeup-workday" : ""}`}
+                  title={holidayMark.name}
+                  aria-hidden="true"
+                >
+                  {holidayMark.label}
+                </span>
+              ) : null}
             </button>
           );
         })}

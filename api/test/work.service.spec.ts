@@ -1,12 +1,13 @@
 import { WorkService } from "../src/work/work.service";
 import { WorkRepository } from "../src/work/work.repository";
-import { DailyRecord, RecordItem, WorkSlot } from "../src/work/work.types";
+import { WorkEventsService } from "../src/work/work-events.service";
+import { DailyRecord, HolidayCalendarDay, RecordItem, WorkSlot } from "../src/work/work.types";
 
 describe("WorkService", () => {
   let service: WorkService;
 
   beforeEach(() => {
-    service = new WorkService(new InMemoryWorkRepository());
+    service = new WorkService(new InMemoryWorkRepository(), new WorkEventsService());
   });
 
   it("returns default slots when none are saved", async () => {
@@ -96,6 +97,18 @@ describe("WorkService", () => {
       service.normalizeWork({ text: "随便写点东西", selectedDate: "2026/02/02" })
     ).rejects.toThrow("selectedDate 格式必须为 YYYY-MM-DD");
   });
+
+  it("syncs holiday calendar and returns holiday month overview", async () => {
+    await service.syncHolidayCalendarForToday();
+    const overview = await service.getHolidayMonthOverview("2026-02");
+    const makeup = overview.days.find((day) => day.date === "2026-02-14");
+    const holiday = overview.days.find((day) => day.date === "2026-02-15");
+
+    expect(makeup?.type).toBe("makeupWorkday");
+    expect(makeup?.label).toBe("班");
+    expect(holiday?.type).toBe("statutoryHoliday");
+    expect(holiday?.label).toBe("春节");
+  });
 });
 
 class InMemoryWorkRepository implements WorkRepository {
@@ -105,6 +118,7 @@ class InMemoryWorkRepository implements WorkRepository {
   private recordsByDate = new Map<string, DailyRecord>();
   private itemsById = new Map<number, RecordItem>();
   private slotsByDate = new Map<string, WorkSlot[]>();
+  private holidayByDate = new Map<string, HolidayCalendarDay>();
 
   async getSlotsByDate(date: string): Promise<WorkSlot[]> {
     return this.slotsByDate.get(date) ?? [];
@@ -127,6 +141,15 @@ class InMemoryWorkRepository implements WorkRepository {
 
   async findRecordByDate(date: string): Promise<DailyRecord | null> {
     return this.recordsByDate.get(date) ?? null;
+  }
+
+  async findRecordById(recordId: number): Promise<DailyRecord | null> {
+    for (const record of this.recordsByDate.values()) {
+      if (record.id === recordId) {
+        return record;
+      }
+    }
+    return null;
   }
 
   async createRecord(date: string, now: string): Promise<DailyRecord> {
@@ -213,5 +236,37 @@ class InMemoryWorkRepository implements WorkRepository {
     for (const record of this.recordsByDate.values()) {
       record.items = record.items.filter((entry) => entry.id !== itemId);
     }
+  }
+
+  async getHolidayDaysByDateRange(startDate: string, endDate: string): Promise<HolidayCalendarDay[]> {
+    const result: HolidayCalendarDay[] = [];
+    for (const [date, day] of this.holidayByDate.entries()) {
+      if (date >= startDate && date <= endDate) {
+        result.push({ ...day });
+      }
+    }
+    result.sort((a, b) => a.date.localeCompare(b.date));
+    return result;
+  }
+
+  async replaceHolidayDaysByYear(sourceYear: number, days: HolidayCalendarDay[]): Promise<void> {
+    for (const [date, day] of this.holidayByDate.entries()) {
+      if (day.source_year === sourceYear) {
+        this.holidayByDate.delete(date);
+      }
+    }
+    days.forEach((day) => {
+      this.holidayByDate.set(day.date, { ...day });
+    });
+  }
+
+  async countHolidayDaysByYear(sourceYear: number): Promise<number> {
+    let count = 0;
+    for (const day of this.holidayByDate.values()) {
+      if (day.source_year === sourceYear) {
+        count += 1;
+      }
+    }
+    return count;
   }
 }

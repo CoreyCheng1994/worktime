@@ -78,16 +78,16 @@
 }
 
 .task-calendar__day {
-  min-height: 46px;
+  height: 40px;
   border: none;
   border-radius: 10px;
   background: transparent;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
+  position: relative;
+  overflow: visible;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 2px;
   padding: 2px;
   transition: all 0.18s ease;
 }
@@ -144,8 +144,13 @@
 }
 
 .task-calendar__day-tag {
-  min-width: 18px;
-  padding: 0 4px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  transform: translate(34%, -34%);
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
   border-radius: 999px;
   font-size: 9px;
   line-height: 14px;
@@ -153,6 +158,9 @@
   text-align: center;
   border: 1px solid transparent;
   color: var(--calendar-muted);
+  box-shadow: 0 0 0 1px var(--bg-surface, #fbfaf7);
+  pointer-events: none;
+  z-index: 2;
 }
 
 .task-calendar__day-tag.is-holiday {
@@ -190,10 +198,12 @@
   }
 
   .task-calendar__day {
-    min-height: 42px;
+    height: 36px;
   }
 
   .task-calendar__day-tag {
+    min-width: 14px;
+    height: 14px;
     font-size: 8px;
     line-height: 12px;
   }

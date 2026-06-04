@@ -51,6 +51,7 @@ export class MySqlWorkRepository implements WorkRepository {
   private pool: Pool | null = null;
   private poolFingerprint = "";
   private schemaReadyFingerprint = "";
+  private poolInitPromise: Promise<Pool> | null = null;
 
   async getSlotsByDate(date: string): Promise<WorkSlot[]> {
     const pool = await this.getPool();
@@ -361,6 +362,19 @@ export class MySqlWorkRepository implements WorkRepository {
   }
 
   private async getPool(): Promise<Pool> {
+    if (this.poolInitPromise) {
+      return await this.poolInitPromise;
+    }
+
+    this.poolInitPromise = this.resolvePool();
+    try {
+      return await this.poolInitPromise;
+    } finally {
+      this.poolInitPromise = null;
+    }
+  }
+
+  private async resolvePool(): Promise<Pool> {
     const config = loadRuntimeConfig();
     if (!isDbConfigured(config)) {
       throw new Error("数据库配置不完整，请在设置页填写 MySQL 配置");
@@ -383,11 +397,14 @@ export class MySqlWorkRepository implements WorkRepository {
     }
 
     if (this.pool) {
-      await this.pool.end();
+      const stalePool = this.pool;
+      this.pool = null;
+      this.poolFingerprint = "";
       this.schemaReadyFingerprint = "";
+      await stalePool.end();
     }
 
-    this.pool = mysql.createPool({
+    const nextPool = mysql.createPool({
       host: config.db.host,
       port: Number(config.db.port),
       user: config.db.user,
@@ -398,14 +415,15 @@ export class MySqlWorkRepository implements WorkRepository {
       supportBigNumbers: true,
       bigNumberStrings: true
     });
+    this.pool = nextPool;
     this.poolFingerprint = fingerprint;
 
     try {
-      await this.ensureRuntimeSchema(this.pool);
+      await this.ensureRuntimeSchema(nextPool);
       this.schemaReadyFingerprint = fingerprint;
-      return this.pool;
+      return nextPool;
     } catch (error) {
-      await this.pool.end();
+      await nextPool.end();
       this.pool = null;
       this.poolFingerprint = "";
       this.schemaReadyFingerprint = "";
